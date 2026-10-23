@@ -1,4 +1,4 @@
-﻿# StockRescue
+# StockRescue
 
 **Supplier-disruption recovery for industrial repair workshops**
 
@@ -386,85 +386,63 @@ Run focused tests when changing a component, then execute the full suite after i
 
 Only report results from commands that actually ran. Unit tests with mocked transport do not prove live Agentverse communication. A live smoke test must demonstrate that a real remote request was received and that the returned typed response was validated.
 
-## Frontend plan
+## Frontend Application
 
-The frontend has intentionally been deferred until backend APIs and the full recovery workflow are reliable. It should be an operator-facing application, not merely a static 3D demo.
+The operator-facing frontend is implemented in `frontend/` using React 19, Vite 8, TypeScript 5.8, Tailwind CSS v4, and Three.js (via React Three Fiber & Drei).
 
-### Planned user experience
+### Architecture & Capabilities
 
-1. **Authentication and access:** sign in through Supabase Auth, obtain a session access token, and send it as a Bearer token to protected backend routes. Never embed a Supabase service-role key, PostgreSQL URL, agent seed, or signing secret in browser code.
-2. **Operations dashboard:** display current cases, active disruptions, affected work, short-stock parts, recovery status, unresolved risks, and last-updated timestamps.
-3. **Interactive 3D warehouse:** represent warehouse zones, shelves, bins, and stock-bearing items in Three.js. Selecting a location or item should open a detail panel sourced from the API. Use clear status colors with accessible text labels; color must not be the sole status indicator.
-4. **Disruption workspace:** explain the disruption, required BOM quantity, verified available quantity, shortage, affected jobs, known deadline information, and unknown fields.
-5. **Supplier comparison:** show candidates, offered SKUs, compatibility result, quote data, known/unknown freight, lead time, evidence source, and quote-risk flags. Never present unknown data as confirmed.
-6. **Recovery-plan comparison:** show the proposed plan, allocation by supplier, total cost/currency, completion estimate where verified, constraints, assumptions, and blockers.
-7. **Approval workspace:** show the exact plan version/fingerprint, approver permissions, approved cost ceiling and currency, expiry, audit history, and revoked/expired states. Approval UI must call authenticated backend endpoints; do not treat a frontend button state as authorization.
-8. **Procurement drafts:** present the generated draft and its authorization state. The initial release must not submit an order automatically.
-9. **Vendor communication drafts:** let authorized users review or copy drafts. Sending external communication remains disabled unless separately implemented and approved.
-10. **Delivery monitoring:** show only recorded delivery events and explicitly label missing/unconfirmed status as unknown.
-11. **Workflow timeline:** show each specialist's execution mode, status, duration, correlation ID, error code and timestamps, while excluding credentials and sensitive payload data.
+1. **Authentication & Protected Routes:** Integrates with Supabase Auth (`@supabase/supabase-js`). Session JWTs are stored and passed as `Authorization: Bearer <token>` to protected backend endpoints. The `/approvals` route strictly requires the `procurement_approver` role.
+2. **Operations Dashboard:** Displays live disruption cases, shortage metrics, at-risk jobs, recovery plan status, and recent audit trails.
+3. **Interactive 3D Warehouse:** Built with Three.js (`@react-three/fiber` and `@react-three/drei`), rendering warehouse aisles, racks, shelves, and color/symbol-coded inventory bins. Includes orbit controls, SKU search with camera focus, and bin detail inspector.
+4. **Accessible 2D Fallback:** Automatic WebGL detection and manual toggle to an accessible, filterable table view (`WarehouseListFallback`).
+5. **Disruptions & Intake:** Case tracker with search, detail view, timeline audit history, and a dynamic multi-section case intake form (`/disruptions/new`).
+6. **Approval Centre:** Enforces human-in-the-loop review, max cost ceilings, and revocations. Real purchasing remains strictly disabled.
+7. **Draft-Only Comms:** Displays vendor drafts clearly labeled `DRAFT — NOT SENT` with copy-only actions and no external dispatch button.
+8. **Agentverse Mailbox Map:** Visualizes the 8 mailbox identities and maps them to their 9 logical specialist capabilities with honest `Unknown` status handling.
 
-### Proposed frontend structure
+### Frontend Setup & Development
 
-Adapt to the actual frontend package when it is created; do not add empty files merely to match this proposal.
+Requires **Node.js 24 LTS** (pinned in `.nvmrc`) and npm `>=10.0.0`:
 
-```text
-frontend/
-â”œâ”€â”€ package.json
-â”œâ”€â”€ vite.config.ts
-â”œâ”€â”€ index.html
-â”œâ”€â”€ src/
-â”‚   â”œâ”€â”€ app/
-â”‚   â”‚   â”œâ”€â”€ App.tsx
-â”‚   â”‚   â”œâ”€â”€ router.tsx
-â”‚   â”‚   â””â”€â”€ providers.tsx
-â”‚   â”œâ”€â”€ components/
-â”‚   â”‚   â”œâ”€â”€ layout/
-â”‚   â”‚   â”œâ”€â”€ feedback/
-â”‚   â”‚   â”œâ”€â”€ warehouse3d/
-â”‚   â”‚   â””â”€â”€ data-display/
-â”‚   â”œâ”€â”€ features/
-â”‚   â”‚   â”œâ”€â”€ auth/
-â”‚   â”‚   â”œâ”€â”€ dashboard/
-â”‚   â”‚   â”œâ”€â”€ inventory/
-â”‚   â”‚   â”œâ”€â”€ disruptions/
-â”‚   â”‚   â”œâ”€â”€ suppliers/
-â”‚   â”‚   â”œâ”€â”€ recovery-plans/
-â”‚   â”‚   â”œâ”€â”€ approvals/
-â”‚   â”‚   â””â”€â”€ deliveries/
-â”‚   â”œâ”€â”€ hooks/
-â”‚   â”œâ”€â”€ lib/
-â”‚   â”‚   â”œâ”€â”€ api-client.ts
-â”‚   â”‚   â”œâ”€â”€ auth-client.ts
-â”‚   â”‚   â””â”€â”€ validation.ts
-â”‚   â”œâ”€â”€ types/
-â”‚   â””â”€â”€ styles/
-â””â”€â”€ tests/
-```
+```bash
+# Activate Node 24 LTS
+nvm use 24
 
-### Frontend engineering requirements
-
-- Use TypeScript where feasible and derive endpoint schemas from the backend OpenAPI contract where practical.
-- Keep API access in a centralized typed client rather than scattering `fetch` calls throughout UI components.
-- Read the backend base URL from a Vite environment variable such as `VITE_API_BASE_URL`; only public configuration may use the `VITE_` prefix. Never place secrets in frontend environment variables.
-- Send the Supabase session's access token as `Authorization: Bearer <token>` for authenticated routes. The backend must independently verify the token and authorization on every protected action.
-- Handle loading, empty, stale, error, unauthorized, forbidden, and partial/blocked workflow states.
-- Validate untrusted API data at the UI boundary when appropriate.
-- Make the 3D warehouse performant: lazy-load the scene, dispose of Three.js resources, support reduced-motion preferences, provide a 2D/list alternative, and ensure keyboard and screen-reader access to important data.
-- The frontend must not calculate or override authoritative business decisions. Display backend-validated results and explain uncertainty.
-- Do not use mock responses to make production API integrations appear complete. If a mock mode is used during UI development, label it clearly and keep it separate from integration acceptance tests.
-
-### Frontend setup (when implemented)
-
-When a `frontend/` package exists, read its actual `package.json` before installing or running commands. The intended development commands will ordinarily be similar to:
-
-```powershell
-cd C:\agent\stockrescue\frontend
+# Navigate to frontend directory and install dependencies
+cd frontend
 npm install
+
+# Start development server (default port: 5173 or custom e.g. 5190)
 npm run dev
+
+# Run TypeScript typechecker
+npm run typecheck
+
+# Run Vitest unit & component tests
+npm test
+
+# Run ESLint
+npm run lint
+
+# Build production bundle
+npm run build
 ```
 
-The exact scripts depend on the package configuration. Do not claim the frontend is runnable before this package and its source are actually present.
+### Frontend Environment Configuration
+
+Configuration template is provided in `frontend/.env.example`. Copy to `frontend/.env.local`:
+
+```dotenv
+# Backend base URL
+VITE_API_BASE_URL=http://localhost:8000
+
+# Supabase Auth public configuration
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+> **Security Rule:** Never place database passwords, service-role keys, or agent seeds in `VITE_*` variables. Only public anon keys are exposed in the client bundle.
 
 ## API and frontend integration
 

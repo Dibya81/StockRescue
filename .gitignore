@@ -20,8 +20,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
+!frontend/src/lib/
 parts/
 sdist/
 var/
@@ -37,6 +38,14 @@ wheels/
 htmlcov/
 .tox/
 .nox/
+test-results/
+**/test-results/
+screenshots/
+**/screenshots/
+*.png
+*.jpg
+*.jpeg
+*.webp
 
 # Frontend Build Outputs & Local Runs
 frontend/dist/
