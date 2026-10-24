@@ -477,7 +477,7 @@ export function WarehousePage() {
 
           {mode === 'simulation' && sim.state && (
             <Panel title="Scenario player">
-              <SimControls state={sim.state} onStart={sim.start} onPause={sim.pause} onStep={sim.step} onReset={sim.reset} />
+              <SimControls state={sim.state} onStart={sim.start} onPause={sim.pause} onStep={sim.step} onReset={sim.reset} onToggleBackground={sim.setBackground} />
             </Panel>
           )}
 

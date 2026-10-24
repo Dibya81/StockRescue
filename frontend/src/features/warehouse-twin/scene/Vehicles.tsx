@@ -246,7 +246,10 @@ interface VehiclesProps {
 }
 
 const ptKey = (p: Pt) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`
-const LOADED_TASKS = new Set(['putaway', 'reallocate'])
+const LOADED_TASKS = new Set(['putaway', 'reallocate', 'replenish'])
+/** Carrying a pallet: loaded jobs on the way out, picks on the way back */
+const isLoaded = (task: Equipment['currentTask']) =>
+  !!task && (LOADED_TASKS.has(task.kind) || (task.kind === 'return' && task.description.includes('after pick')))
 
 export function Vehicles({ layout, plan, graph, equipment, shipments, stale, onSelectEquipment, onSelectShipment }: VehiclesProps) {
   const mats = useMaterials()
@@ -264,7 +267,7 @@ export function Vehicles({ layout, plan, graph, equipment, shipments, stale, onS
     const s = useTwinStore.getState()
     const active = equipment
       .filter(e => e.status === 'active' && e.currentTask && MOBILE(e.type))
-      .sort((a, b) => Number(LOADED_TASKS.has(b.currentTask!.kind)) - Number(LOADED_TASKS.has(a.currentTask!.kind)) || a.id.localeCompare(b.id))
+      .sort((a, b) => Number(isLoaded(b.currentTask)) - Number(isLoaded(a.currentTask)) || a.id.localeCompare(b.id))
     for (const e of active) {
       const route = routes.get(e.id)
       const started = s.startedAt[startKey('equipment', e.id, e.currentTask!.id)]
@@ -367,7 +370,7 @@ function EquipmentUnit({ eq, route, mats, traffic, granted, stale, onSelect }: U
   const frozenElapsed = useRef<number | null>(null)
   const { freeze } = getSceneParams()
   const taskId = eq.currentTask?.id ?? null
-  const loaded = !!eq.currentTask && LOADED_TASKS.has(eq.currentTask.kind)
+  const loaded = isLoaded(eq.currentTask)
   const total = routeLength(route.points)
   const speed = EQUIPMENT_SPEED[eq.type]
 

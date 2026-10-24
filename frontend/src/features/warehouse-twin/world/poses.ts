@@ -59,6 +59,16 @@ export function equipmentRoute(eq: Equipment, layout: WarehouseLayout, g: NavGra
   const task = eq.currentTask
   if (eq.status !== 'active' || !task || !MOBILE(eq.type)) return { points: [home], finalHeading: null, liftY: null }
 
+  // A return leg drives from where the previous task ended back to the bay
+  if (task.kind === 'return') {
+    const from = task.fromPositionId ? positionServiceNode(layout, g, task.fromPositionId)
+      : task.dockId ? dockNodeId(task.dockId)
+      : task.zoneId ? zoneNodeId(task.zoneId) : null
+    const back = from ? findPath(g, from, homeNodeId(eq.id)) : null
+    if (!back) return { points: [home], finalHeading: null, liftY: null }
+    return { points: back.map(id => [g.nodes.get(id)!.x, g.nodes.get(id)!.z] as Pt), finalHeading: Math.PI, liftY: null }
+  }
+
   let target: string | null = null
   let facePoint: Pt | null = null
   let liftY: number | null = null

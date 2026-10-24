@@ -27,6 +27,7 @@ import type {
 } from '../data/schemas'
 import { DEFAULT_SCENARIO_ID, SCENARIOS } from '../scenarios'
 import { useTwinStore } from '../store/twinStore'
+import { getSceneParams } from '../world/sceneParams'
 
 // ── Provider registry ────────────────────────────────────
 // One provider per mode for the lifetime of the page, so the simulation
@@ -50,7 +51,7 @@ export function getProvider(mode: DataMode): TwinDataProvider {
   simProvider ??= new SimulationProvider(() => {
     const entry = SCENARIOS.find(s => s.id === DEFAULT_SCENARIO_ID) ?? SCENARIOS[0]
     return entry.load()
-  })
+  }, { background: !getSceneParams().freeze })
   return simProvider
 }
 
@@ -229,6 +230,7 @@ export function useSimulation() {
     pause: useCallback(() => sim?.pause(), [sim]),
     step: useCallback(() => void sim?.step(), [sim]),
     reset: useCallback(() => void sim?.reset(), [sim]),
+    setBackground: useCallback((on: boolean) => sim?.setBackground(on), [sim]),
   }
 }
 

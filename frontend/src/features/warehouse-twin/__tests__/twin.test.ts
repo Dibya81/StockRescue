@@ -173,7 +173,7 @@ describe('layout geometry and reducers', () => {
 // Simulation provider
 // ─────────────────────────────────────────────────────────
 describe('SimulationProvider', () => {
-  const make = () => new SimulationProvider(loadScenario, { latencyMs: 0, speed: 1000 })
+  const make = () => new SimulationProvider(loadScenario, { latencyMs: 0, speed: 1000, background: false })
 
   async function stepUntil(sim: SimulationProvider, status: string, max = 30) {
     for (let i = 0; i < max && sim.getSimState().status !== status; i++) await sim.step()
@@ -255,6 +255,35 @@ describe('SimulationProvider', () => {
     await sim.rejectRecovery(disruption.id, { optionId: null, comment: 'Need alternatives' }, actor('approver'))
     expect(sim.getSimState().status).toBe('rejected')
     expect((await sim.getRecovery(disruption.id)).plan?.status).toBe('rejected')
+  })
+
+  it('runs routine simulated activity through normal events and yields to the scenario', async () => {
+    vi.useFakeTimers()
+    try {
+      const sim = new SimulationProvider(loadScenario, { latencyMs: 0, background: true })
+      const events: TwinEvent[] = []
+      sim.subscribe(e => events.push(e))
+      await sim.getLayout()
+      await vi.advanceTimersByTimeAsync(90_000)
+      const jobs = events.filter(e => e.type === 'equipment.task' && e.equipment.currentTask?.id.startsWith('BG-'))
+      expect(jobs.length).toBeGreaterThan(3)
+      expect(events.some(e => e.type === 'equipment.task' && e.equipment.currentTask?.kind === 'return')).toBe(true)
+      const trucks = events.filter(e => e.type === 'shipment.status' && e.shipment.id.startsWith('SHP-OUT-'))
+      expect(trucks.map(e => (e.type === 'shipment.status' ? e.shipment.status : ''))).toContain('loading')
+      // Routine trucks only use dispatch docks
+      const layout = await sim.getLayout()
+      for (const e of trucks) {
+        if (e.type !== 'shipment.status') continue
+        expect(layout.docks.find(d => d.id === e.shipment.dockId)?.purpose).toBe('dispatch')
+      }
+      // Turning it off parks routine units and sends routine trucks away
+      sim.setBackground(false)
+      expect((await sim.getEquipment()).some(e => e.currentTask?.id.startsWith('BG-'))).toBe(false)
+      expect(sim.getSimState().background).toBe(false)
+      sim.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reset restores the initial state', async () => {

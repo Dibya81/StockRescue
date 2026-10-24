@@ -27,9 +27,10 @@ interface SimControlsProps {
   onPause: () => void
   onStep: () => void
   onReset: () => void
+  onToggleBackground?: (on: boolean) => void
 }
 
-export function SimControls({ state, onStart, onPause, onStep, onReset }: SimControlsProps) {
+export function SimControls({ state, onStart, onPause, onStep, onReset, onToggleBackground }: SimControlsProps) {
   const running = state.status === 'running'
   const ended = state.status === 'completed' || state.status === 'rejected'
   const gated = state.status === 'awaiting_approval'
@@ -75,6 +76,16 @@ export function SimControls({ state, onStart, onPause, onStep, onReset }: SimCon
           <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Reset
         </button>
       </div>
+
+      {onToggleBackground && (
+        <label className="flex items-start gap-2 rounded-lg bg-[#F8FAFC] px-2.5 py-2 text-xs text-[#334155]">
+          <input type="checkbox" checked={state.background} onChange={e => onToggleBackground(e.target.checked)} className="mt-0.5 accent-[#1F4FD8]" />
+          <span>
+            <span className="font-semibold text-[#0F172A]">Routine activity</span> <SimulatedTag className="ml-1" />
+            <span className="block text-[11px] text-[#64748B]">Simulated pick, stage and replenish jobs and outbound trucks, so equipment, drivers and dock staff are active between scenario steps.</span>
+          </span>
+        </label>
+      )}
     </div>
   )
 }

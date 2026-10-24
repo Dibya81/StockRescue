@@ -31,6 +31,10 @@ import {
   type WarehouseLayout,
 } from './schemas'
 import { materializeEvent, type Scenario, type ScenarioStep } from '../scenarios'
+import { createRng } from '../world/sceneParams'
+import { buildSitePlan, type SitePlan } from '../world/sitePlan'
+import { buildNavGraph, type NavGraph } from '../world/navGraph'
+import { EQUIPMENT_SPEED, equipmentRoute, routeLength } from '../world/poses'
 
 export type SimRunStatus = 'loading' | 'idle' | 'running' | 'paused' | 'awaiting_approval' | 'completed' | 'rejected'
 
@@ -43,6 +47,8 @@ export interface SimState {
   totalSteps: number
   lastStepLabel: string | null
   nextStepLabel: string | null
+  /** Routine simulated warehouse activity (equipment jobs, outbound trucks) */
+  background: boolean
 }
 
 interface SimData {
@@ -61,6 +67,8 @@ export interface SimulationProviderOptions {
   /** Multiplier on scenario step delays (2 = twice as fast). */
   speed?: number
   now?: () => Date
+  /** Run routine simulated activity alongside the scenario (default true) */
+  background?: boolean
 }
 
 const clone = <T,>(v: T): T => structuredClone(v)
@@ -86,6 +94,11 @@ export class SimulationProvider implements TwinDataProvider {
   private lastStepLabel: string | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private auditSeq = 0
+  private background: boolean
+  private bgTimers = new Set<ReturnType<typeof setTimeout>>()
+  private bgSeq = 0
+  private bgRng = createRng(20261024)
+  private bgGraph: { graph: NavGraph; plan: SitePlan } | null = null
   private snapshot: SimState = this.computeSimState()
 
   private readonly listeners = new Set<(e: TwinEvent) => void>()
@@ -98,6 +111,7 @@ export class SimulationProvider implements TwinDataProvider {
     this.latencyMs = options.latencyMs ?? 160
     this.speed = options.speed ?? 1
     this.now = options.now ?? (() => new Date())
+    this.background = options.background ?? true
   }
 
   // ── Lifecycle ──────────────────────────────────────────
@@ -110,6 +124,7 @@ export class SimulationProvider implements TwinDataProvider {
         this.status = 'idle'
         this.emitConnection()
         this.emitSim()
+        if (this.background) this.startBackground()
       })
       this.loading.catch(() => {
         this.loading = null
@@ -337,10 +352,157 @@ export class SimulationProvider implements TwinDataProvider {
   async reset() {
     await this.ready()
     this.clearTimer()
+    this.stopBackground()
     this.resetData()
     this.status = 'idle'
     this.emitSim()
     this.resetListeners.forEach(l => l())
+    if (this.background) this.startBackground()
+  }
+
+  // ── Routine operations (simulated) ─────────────────────
+  // Idle equipment gets pick / stage / replenish jobs, drives out, works and
+  // drives back; outbound trucks load at the dispatch docks. Everything is
+  // emitted as normal events, so the scene derives vehicles and people from
+  // data. Units or docks the scenario uses are always left to the scenario.
+
+  setBackground(on: boolean) {
+    this.background = on
+    if (on) this.startBackground()
+    else this.stopBackground()
+    this.emitSim()
+  }
+
+  private later(ms: number, fn: () => void) {
+    const t = setTimeout(() => {
+      this.bgTimers.delete(t)
+      fn()
+    }, ms)
+    this.bgTimers.add(t)
+  }
+
+  private stopBackground() {
+    this.bgTimers.forEach(t => clearTimeout(t))
+    this.bgTimers.clear()
+    if (!this.data) return
+    const nowIso = this.now().toISOString()
+    // Park any unit still on a routine job; send routine trucks away
+    for (const e of this.data.equipment) {
+      if (e.currentTask?.id.startsWith('BG-')) this.dispatch({ type: 'equipment.task', at: nowIso, equipment: { ...e, status: 'idle', currentTask: null } })
+    }
+    for (const sh of this.data.shipments) {
+      if (sh.id.startsWith('SHP-OUT-') && sh.status !== 'departed') {
+        this.dispatch({ type: 'shipment.status', at: nowIso, shipment: { ...sh, status: 'departed' } })
+        if (sh.dockId) this.dispatch({ type: 'dock.status', at: nowIso, dockId: sh.dockId, status: 'available' })
+      }
+    }
+  }
+
+  private routeSeconds(eq: Equipment, task: NonNullable<Equipment['currentTask']>): number {
+    const d = this.data
+    if (!d) return 20
+    if (!this.bgGraph) {
+      const plan = buildSitePlan(d.layout, 42)
+      const homes = d.equipment.filter(x => x.type !== 'conveyor').map(x => ({ id: x.id, x: x.home.x, z: x.home.z }))
+      this.bgGraph = { plan, graph: buildNavGraph(d.layout, plan, homes) }
+    }
+    const route = equipmentRoute({ ...eq, status: 'active', currentTask: task }, d.layout, this.bgGraph.graph)
+    const speed = EQUIPMENT_SPEED[eq.type] || 1
+    return routeLength(route.points) / speed
+  }
+
+  private startBackground() {
+    if (!this.data || this.bgTimers.size > 0) return
+    const units = this.data.equipment.filter(e => e.type !== 'conveyor' && e.status !== 'maintenance')
+    units.forEach((e, i) => this.later(600 + i * 1700 + this.bgRng() * 1500, () => this.runJob(e.id)))
+    this.later(1500, () => this.runTruck())
+  }
+
+  private runJob(equipmentId: string) {
+    const d = this.data
+    if (!d) return
+    const eq = d.equipment.find(e => e.id === equipmentId)
+    // Busy with a scenario task: try again later
+    if (!eq || (eq.status === 'active' && !eq.currentTask?.id.startsWith('BG-'))) {
+      this.later(8000, () => this.runJob(equipmentId))
+      return
+    }
+    const rng = this.bgRng
+    const lifter = ['forklift', 'reach_truck', 'order_picker', 'scissor_lift'].includes(eq.type)
+    const placed = d.inventory.filter(l => l.positionId && (lifter || l.positionId.includes('-L01-')))
+    const zones = d.layout.zones.filter(z => z.kind === 'dispatch' || z.kind === 'receiving')
+    const id = `BG-${++this.bgSeq}`
+    let task: NonNullable<Equipment['currentTask']>
+    if ((eq.type === 'trolley' || eq.type === 'manual_pallet_jack' || rng() < 0.3) && zones.length) {
+      const z = zones[Math.floor(rng() * zones.length)]
+      task = { id, kind: 'stage', description: `Stage outbound pallets in ${z.name}`, fromPositionId: null, toPositionId: null, dockId: null, zoneId: z.id }
+    } else if (placed.length) {
+      const lot = placed[Math.floor(rng() * placed.length)]
+      const kind = rng() < 0.5 ? 'pick' : 'replenish'
+      task = { id, kind, description: `${kind === 'pick' ? 'Pick' : 'Replenish'} ${lot.sku} at ${lot.positionId}`, fromPositionId: null, toPositionId: lot.positionId, dockId: null, zoneId: null }
+    } else {
+      this.later(10000, () => this.runJob(equipmentId))
+      return
+    }
+    const nowIso = this.now().toISOString()
+    this.dispatch({ type: 'equipment.task', at: nowIso, equipment: { ...eq, status: 'active', currentTask: task } })
+    const outbound = this.routeSeconds(eq, task)
+    const work = 6 + rng() * 6
+    this.later((outbound + work) * 1000, () => {
+      const cur = this.data?.equipment.find(e => e.id === equipmentId)
+      if (!cur || cur.currentTask?.id !== id) return this.later(8000, () => this.runJob(equipmentId))
+      const back = { ...task, id: `${id}-R`, kind: 'return', description: `Return to bay after ${task.kind}`, fromPositionId: task.toPositionId }
+      this.dispatch({ type: 'equipment.task', at: this.now().toISOString(), equipment: { ...cur, currentTask: back } })
+      const ret = this.routeSeconds(cur, back)
+      this.later((ret + 1) * 1000, () => {
+        const c2 = this.data?.equipment.find(e => e.id === equipmentId)
+        if (c2?.currentTask?.id === back.id) {
+          this.dispatch({ type: 'equipment.task', at: this.now().toISOString(), equipment: { ...c2, status: 'idle', currentTask: null } })
+        }
+        this.later(4000 + this.bgRng() * 9000, () => this.runJob(equipmentId))
+      })
+    })
+  }
+
+  private runTruck() {
+    const d = this.data
+    if (!d) return
+    const rng = this.bgRng
+    // Dispatch docks not used by any live shipment or the scenario
+    const busy = new Set(d.shipments.filter(s => s.dockId && s.status !== 'departed').map(s => s.dockId))
+    const docks = d.layout.docks.filter(x => x.purpose === 'dispatch' && x.status === 'available' && !busy.has(x.id))
+    if (docks.length === 0) return this.later(15000, () => this.runTruck())
+    const dock = docks[Math.floor(rng() * docks.length)]
+    const customers = ['Riverside Pumps Ltd', 'Northgate Conveyors', 'Halden Process Systems', 'Corvex Automation']
+    const types: Shipment['vehicleType'][] = ['delivery_truck', 'trailer_truck', 'container_truck']
+    const sku = d.inventory[Math.floor(rng() * d.inventory.length)]
+    const base: Shipment = {
+      id: `SHP-OUT-${4100 + ++this.bgSeq}`,
+      supplier: { id: `CUST-${dock.id}`, name: `Outbound to ${customers[Math.floor(rng() * customers.length)]}` },
+      vehicleType: types[Math.floor(rng() * types.length)],
+      dockId: dock.id,
+      status: 'arriving',
+      sku: sku?.sku ?? null,
+      qty: sku ? Math.max(1, Math.round(sku.qty / 2)) : null,
+      eta: this.now().toISOString(),
+      milestones: [{ label: 'Arrived', at: null }, { label: 'At dock', at: null }, { label: 'Loaded', at: null }, { label: 'Departed', at: null }],
+    }
+    const ms = (n: number) => base.milestones.map((m, i) => ({ ...m, at: i < n ? this.now().toISOString() : null }))
+    const emit = (status: Shipment['status'], done: number) =>
+      this.dispatch({ type: 'shipment.status', at: this.now().toISOString(), shipment: { ...base, status, milestones: ms(done) } })
+    emit('arriving', 1)
+    this.later(22000, () => {
+      emit('at_dock', 2)
+      this.dispatch({ type: 'dock.status', at: this.now().toISOString(), dockId: dock.id, status: 'occupied' })
+      this.later(4000, () => {
+        emit('loading', 2)
+        this.later(28000 + rng() * 12000, () => {
+          emit('departed', 4)
+          this.dispatch({ type: 'dock.status', at: this.now().toISOString(), dockId: dock.id, status: 'available' })
+        })
+      })
+    })
+    this.later(26000 + rng() * 20000, () => this.runTruck())
   }
 
   /** Stable snapshot (same object until the state changes), for useSyncExternalStore. */
@@ -376,6 +538,7 @@ export class SimulationProvider implements TwinDataProvider {
       totalSteps: steps.length,
       lastStepLabel: this.lastStepLabel,
       nextStepLabel: steps[this.stepIndex]?.label ?? null,
+      background: this.background,
     }
   }
 
@@ -505,6 +668,8 @@ export class SimulationProvider implements TwinDataProvider {
 
   dispose() {
     this.clearTimer()
+    this.bgTimers.forEach(t => clearTimeout(t))
+    this.bgTimers.clear()
     this.listeners.clear()
     this.connectionListeners.clear()
     this.simListeners.clear()
