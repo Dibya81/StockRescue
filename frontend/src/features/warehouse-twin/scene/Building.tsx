@@ -8,6 +8,7 @@ import { BRAND_BLUE, COLUMN_SIZE, GROUND_Y, WALL_THICKNESS } from '../world/cons
 import { rectD, rectW, type SitePlan, type WallOpening, type WallSide } from '../world/sitePlan'
 import { getSceneParams } from '../world/sceneParams'
 import { createCladdingNormal, createLabelTexture } from './textures'
+import { useTwinStore } from '../store/twinStore'
 
 // ── Shared helpers ───────────────────────────────────────
 
@@ -272,6 +273,12 @@ export function Building({ layout, plan, cutaway }: BuildingProps) {
   }, [roofMats, wallMats])
 
   const freeze = getSceneParams().freeze
+  const raining = useTwinStore(s => s.weather) === 'rain'
+  useEffect(() => {
+    // Rain: skylights read darker and wetter (visual state only)
+    roofMats.skylight.color.set(raining ? '#AEB9C6' : '#E6F0FF')
+    roofMats.skylight.roughness = raining ? 0.05 : 0.25
+  }, [raining, roofMats])
   useFrame(({ camera }, delta) => {
     const dt = freeze ? 10 : delta
     const { x, y, z } = camera.position
@@ -504,6 +511,7 @@ function ExitDoor({ opening, plan }: { opening: WallOpening; plan: SitePlan }) {
 }
 
 function WallLights({ plan }: { plan: SitePlan }) {
+  const night = useTwinStore(s => s.timeOfDay) !== 'day'
   const ref = useRef<THREE.InstancedMesh>(null)
   const geo = useMemo(() => rbox(0.5, 0.18, 0.32, 0.05), [])
   useEffect(() => () => geo.dispose(), [geo])
@@ -523,7 +531,26 @@ function WallLights({ plan }: { plan: SitePlan }) {
   useInstanceMatrices(ref, matrices)
   return (
     <instancedMesh ref={ref} args={[geo, undefined, matrices.length]} frustumCulled={false}>
-      <meshStandardMaterial color="#E2E8F0" emissive="#FFF4DD" emissiveIntensity={1.6} metalness={0.6} roughness={0.3} toneMapped={false} />
+      <meshStandardMaterial color="#E2E8F0" emissive="#FFF4DD" emissiveIntensity={night ? 5 : 1.6} metalness={0.6} roughness={0.3} toneMapped={false} />
     </instancedMesh>
+  )
+}
+
+/** Camera-facing label drawn into a canvas texture (no DOM, no font downloads). */
+export function SpriteLabel({ lines, position, width, height, style }: {
+  lines: string[]
+  position: [number, number, number] | THREE.Vector3
+  width: number
+  height: number
+  style?: Parameters<typeof createLabelTexture>[3]
+}) {
+  const key = JSON.stringify([lines, width, height, style])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tex = useMemo(() => createLabelTexture(lines, height, width, { ppm: 220, ...style }), [key])
+  useEffect(() => () => tex.dispose(), [tex])
+  return (
+    <sprite position={position} scale={[width, height, 1]} renderOrder={20}>
+      <spriteMaterial map={tex} depthTest={false} transparent toneMapped={false} />
+    </sprite>
   )
 }

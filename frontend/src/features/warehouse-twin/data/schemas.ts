@@ -131,6 +131,33 @@ export const disruptionSchema = z.object({
   createdAt: isoDate,
 })
 
+export const recoveryActionKindSchema = z.enum([
+  'reallocate', 'inbound_putaway', 'expedite_shipment', 'reroute_shipment', 'substitute_sku', 'release_quarantine',
+])
+
+/** One concrete step of a recovery option, as proposed by the agents. */
+export const recoveryActionSchema = z.object({
+  id: z.string().min(1),
+  seq: z.number().int().positive(),
+  kind: recoveryActionKindSchema,
+  sku: z.string().min(1),
+  qty: z.number().positive(),
+  label: z.string().min(1),
+  fromPositionId: z.string().regex(POSITION_ID_PATTERN).nullable(),
+  toPositionId: z.string().regex(POSITION_ID_PATTERN).nullable(),
+  shipmentId: z.string().nullable(),
+  dockId: z.string().nullable(),
+})
+
+/** Plan-level impact figures; shown only when the plan provides them. */
+export const recoveryImpactSchema = z.object({
+  unitsMoved: z.number().nonnegative().optional(),
+  skusProtected: z.number().int().nonnegative().optional(),
+  jobsProtected: z.number().int().nonnegative().optional(),
+  riskBefore: z.number().min(0).max(1).optional(),
+  riskAfter: z.number().min(0).max(1).optional(),
+})
+
 export const recoveryOptionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -147,6 +174,8 @@ export const recoveryOptionSchema = z.object({
   confidence: z.number().min(0).max(1),
   reasoning: z.string().min(1),
   sources: z.array(z.string().min(1)),
+  actions: z.array(recoveryActionSchema).default([]),
+  impact: recoveryImpactSchema.nullable().optional(),
 })
 
 export const allocationSchema = z.object({
@@ -228,6 +257,9 @@ export const equipmentSchema = z.object({
     description: z.string().min(1),
     fromPositionId: z.string().nullable(),
     toPositionId: z.string().nullable(),
+    /** Where the task happens when it is not a rack position */
+    dockId: z.string().nullable().optional(),
+    zoneId: z.string().nullable().optional(),
   }).nullable(),
 })
 
@@ -289,6 +321,9 @@ export type DisruptionStatus = z.infer<typeof disruptionStatusSchema>
 export type ShortageLine = z.infer<typeof shortageLineSchema>
 export type Disruption = z.infer<typeof disruptionSchema>
 export type RecoveryOption = z.infer<typeof recoveryOptionSchema>
+export type RecoveryAction = z.infer<typeof recoveryActionSchema>
+export type RecoveryActionKind = z.infer<typeof recoveryActionKindSchema>
+export type RecoveryImpact = z.infer<typeof recoveryImpactSchema>
 export type Allocation = z.infer<typeof allocationSchema>
 export type RecoveryPlan = z.infer<typeof recoveryPlanSchema>
 export type Approval = z.infer<typeof approvalSchema>

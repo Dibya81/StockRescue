@@ -252,3 +252,110 @@ export function StaleNotice({ ageMs }: { ageMs: number }) {
     </div>
   )
 }
+
+// ── Scene options (view, atmosphere, walk, staff, impact) ──
+
+export function SceneOptions({ afterAvailable, afterLabel, canShowImpact, onShowImpact }: {
+  afterAvailable: boolean
+  afterLabel: string
+  canShowImpact: boolean
+  onShowImpact: () => void
+}) {
+  const viewMode = useTwinStore(s => s.viewMode)
+  const setViewMode = useTwinStore(s => s.setViewMode)
+  const timeOfDay = useTwinStore(s => s.timeOfDay)
+  const setTimeOfDay = useTwinStore(s => s.setTimeOfDay)
+  const weather = useTwinStore(s => s.weather)
+  const setWeather = useTwinStore(s => s.setWeather)
+  const walk = useTwinStore(s => s.walk)
+  const setWalk = useTwinStore(s => s.setWalk)
+  const ambient = useTwinStore(s => s.ambientStaff)
+  const setAmbient = useTwinStore(s => s.setAmbientStaff)
+  const btn = (active: boolean) => clsx(
+    'flex h-11 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition-colors lg:h-8',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1F4FD8] disabled:cursor-not-allowed disabled:opacity-40',
+    active ? 'bg-[#1F4FD8] text-white' : 'text-[#334155] hover:bg-white',
+  )
+  const select = 'rounded-md border border-[#E2E8F0] bg-white px-1.5 py-1 text-xs font-medium text-[#0F172A] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1F4FD8]'
+  return (
+    <div className={clsx('flex flex-wrap items-center gap-1 rounded-xl p-1', glass)}>
+      <div role="radiogroup" aria-label="Inventory view" className="flex items-center gap-0.5">
+        {(['before', 'proposed', 'after'] as const).map(m => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={viewMode === m}
+            disabled={m === 'after' && !afterAvailable}
+            title={m === 'after' ? (afterAvailable ? afterLabel : 'Available once the recovery plan completes') : undefined}
+            onClick={() => setViewMode(m)}
+            className={btn(viewMode === m)}
+          >
+            {m === 'before' ? 'Before' : m === 'proposed' ? 'Proposed' : 'After'}
+          </button>
+        ))}
+      </div>
+      <span className="mx-0.5 h-5 w-px bg-[#CBD5E1]" aria-hidden="true" />
+      <button type="button" onClick={onShowImpact} disabled={!canShowImpact} className={btn(false)}>
+        <Gauge className="h-3.5 w-3.5" aria-hidden="true" /> Show impact
+      </button>
+      <span className="mx-0.5 h-5 w-px bg-[#CBD5E1]" aria-hidden="true" />
+      <label className="flex items-center gap-1 px-1 text-[11px] font-semibold text-[#475569]" title="Visual state only, not live data">
+        Time
+        <select value={timeOfDay} onChange={e => setTimeOfDay(e.target.value as typeof timeOfDay)} className={select} aria-label="Time of day (visual state)">
+          <option value="day">Day</option>
+          <option value="golden">Golden hour</option>
+          <option value="night">Night</option>
+        </select>
+      </label>
+      <label className="flex items-center gap-1 px-1 text-[11px] font-semibold text-[#475569]" title="Visual state only, not live data">
+        Weather
+        <select value={weather} onChange={e => setWeather(e.target.value as typeof weather)} className={select} aria-label="Weather (visual state)">
+          <option value="clear">Clear</option>
+          <option value="rain">Rain</option>
+          <option value="fog">Fog</option>
+        </select>
+      </label>
+      <span className="rounded bg-[#F1F5F9] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#64748B]">Visual state</span>
+      <span className="hidden px-1 text-[10px] text-[#64748B] xl:inline" title="Keyboard camera controls">
+        <kbd className="rounded bg-[#E2E8F0] px-1 font-mono">WASD</kbd>/<kbd className="rounded bg-[#E2E8F0] px-1 font-mono">↑↓←→</kbd> move · <kbd className="rounded bg-[#E2E8F0] px-1 font-mono">Q E</kbd> turn · <kbd className="rounded bg-[#E2E8F0] px-1 font-mono">R F</kbd> zoom · Shift fast
+      </span>
+      <span className="mx-0.5 h-5 w-px bg-[#CBD5E1]" aria-hidden="true" />
+      <button type="button" onClick={() => setWalk(!walk)} aria-pressed={walk} className={btn(walk)} title="First-person: WASD to move, mouse to look, Esc to exit">
+        Walk
+      </button>
+      <button type="button" onClick={() => setAmbient(!ambient)} aria-pressed={ambient} className={btn(ambient)} title="Decorative people on walkways, not from data">
+        Ambient staff (decorative)
+      </button>
+    </div>
+  )
+}
+
+export interface TrackerStep {
+  label: string
+  done: boolean
+  at?: string | null
+}
+
+export function Tracker({ title, subtitle, steps, footer }: { title: string; subtitle?: string; steps: TrackerStep[]; footer?: React.ReactNode }) {
+  return (
+    <section className={clsx('pointer-events-auto w-full max-w-[640px] rounded-xl px-3 py-2', glass)} aria-label="Tracker">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="truncate-text text-xs font-semibold text-[#0F172A]">{title}</p>
+        {subtitle && <p className="truncate-text text-[11px] text-[#64748B]">{subtitle}</p>}
+      </div>
+      <ol className="mt-1.5 flex items-center gap-1">
+        {steps.map((s, i) => (
+          <li key={s.label} className="flex min-w-0 flex-1 items-center gap-1" title={s.at ? `${s.label}: ${new Date(s.at).toLocaleString()}` : s.label}>
+            <span className={clsx('flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold', s.done ? 'bg-[#16A34A] text-white' : 'border border-[#CBD5E1] text-[#94A3B8]')}>
+              {s.done ? <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> : i + 1}
+            </span>
+            <span className={clsx('truncate-text text-[10px]', s.done ? 'text-[#166534]' : 'text-[#64748B]')}>{s.label}</span>
+            {i < steps.length - 1 && <span className={clsx('h-px min-w-2 flex-1', s.done ? 'bg-[#86EFAC]' : 'bg-[#E2E8F0]')} aria-hidden="true" />}
+          </li>
+        ))}
+      </ol>
+      {footer && <div className="mt-1.5 text-[10px] text-[#475569]">{footer}</div>}
+    </section>
+  )
+}

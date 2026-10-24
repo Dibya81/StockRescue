@@ -1,6 +1,7 @@
 import type { WarehouseLayout, Zone } from '../data/schemas'
 import { WALL_THICKNESS } from './constants'
 import { obstacleRects, rectsOverlap, type Rect, type SitePlan } from './sitePlan'
+import { buildNavGraph, edgeCorridors } from './navGraph'
 
 // Visual-only furniture for each zone, placed relative to the zone bounds.
 // None of it represents data: no prop claims a live feed or holds stock.
@@ -88,6 +89,9 @@ export function buildZoneProps(layout: WarehouseLayout, plan: SitePlan, parkingB
     ...plan.columns.map(c => ({ minX: c.x - 0.6, maxX: c.x + 0.6, minZ: c.z - 0.6, maxZ: c.z + 0.6 })),
   ]
   if (plan.crossAisle) blocked.push(plan.crossAisle)
+  // Keep every vehicle route clear (storage aisles are already blocked as obstacles)
+  const graph = buildNavGraph(layout, plan, parkingBays.map((b, i) => ({ id: `bay-${i}`, x: b.x, z: b.z })))
+  blocked.push(...edgeCorridors(graph).filter(r => !layout.aisles.some(a => Math.abs((r.minX + r.maxX) / 2 - a.x) < 0.01)))
   const P = placer(blocked)
   const overhead: Prop[] = []
 

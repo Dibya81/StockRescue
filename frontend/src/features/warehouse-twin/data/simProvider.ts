@@ -344,6 +344,24 @@ export class SimulationProvider implements TwinDataProvider {
   }
 
   /** Stable snapshot (same object until the state changes), for useSyncExternalStore. */
+  /**
+   * Inventory after the scenario's scripted run (recommended option approved),
+   * replayed on a copy of the initial state. Used for the labelled After view.
+   */
+  async getRecordedOutcome(): Promise<InventoryLot[]> {
+    await this.ready()
+    if (!this.scenario) return []
+    let inventory = clone(this.scenario.initialState.inventory)
+    const probe = this.now().toISOString()
+    for (const step of this.scenario.steps) {
+      for (const raw of step.events) {
+        const event = materializeEvent(raw, probe)
+        inventory = applyToInventory(inventory, event) ?? inventory
+      }
+    }
+    return inventory
+  }
+
   getSimState(): SimState {
     return this.snapshot
   }

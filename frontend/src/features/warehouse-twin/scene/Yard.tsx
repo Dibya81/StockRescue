@@ -5,6 +5,7 @@ import { BRAND_BLUE, GROUND_Y } from '../world/constants'
 import { createRng } from '../world/sceneParams'
 import { rectCenter, rectD, rectW, type Rect, type SitePlan } from '../world/sitePlan'
 import { compose, Label, rbox, useInstanceMatrices } from './Building'
+import { useTwinStore } from '../store/twinStore'
 import {
   createAsphaltTextures,
   createFenceAlpha,
@@ -30,6 +31,8 @@ function FlatRect({ rect, y, children, receiveShadow = true }: { rect: Rect; y: 
 
 export function Yard({ layout, plan, seed }: YardProps) {
   const site = plan.site
+  const wet = useTwinStore(s => s.weather) === 'rain'
+  const night = useTwinStore(s => s.timeOfDay) === 'night'
   const textures = useMemo(() => ({
     grass: createGrassTexture(seed, [160, 160]),
     lawn: createGrassTexture(seed + 1, [8, 8]),
@@ -61,7 +64,8 @@ export function Yard({ layout, plan, seed }: YardProps) {
 
       {/* Paved site, markings, road */}
       <FlatRect rect={site} y={GROUND_Y - 0.01}>
-        <meshStandardMaterial map={textures.asphalt.map} roughnessMap={textures.asphalt.roughnessMap} roughness={0.95} />
+        {/* Rain is a visual state: a wet, glossier and darker apron */}
+        <meshStandardMaterial map={textures.asphalt.map} roughnessMap={wet ? null : textures.asphalt.roughnessMap} roughness={wet ? 0.18 : 0.95} color={wet ? '#9AA2AA' : '#FFFFFF'} envMapIntensity={wet ? 1.6 : 1} />
       </FlatRect>
       <FlatRect rect={site} y={GROUND_Y + 0.004}>
         <meshStandardMaterial map={textures.markings} transparent depthWrite={false} roughness={0.8} polygonOffset polygonOffsetFactor={-1} />
@@ -95,7 +99,7 @@ export function Yard({ layout, plan, seed }: YardProps) {
       <Hedges plan={plan} />
       <Fence plan={plan} alpha={textures.fence} />
       <GateAndBooth plan={plan} />
-      <Poles plan={plan} />
+      <Poles plan={plan} night={night} />
       <Bollards plan={plan} />
     </group>
   )
@@ -296,7 +300,7 @@ function GateAndBooth({ plan }: { plan: SitePlan }) {
   )
 }
 
-function Poles({ plan }: { plan: SitePlan }) {
+function Poles({ plan, night }: { plan: SitePlan; night: boolean }) {
   const pole = useRef<THREE.InstancedMesh>(null)
   const head = useRef<THREE.InstancedMesh>(null)
   const cctvPole = useRef<THREE.InstancedMesh>(null)
@@ -321,7 +325,7 @@ function Poles({ plan }: { plan: SitePlan }) {
         <meshStandardMaterial color="#94A3B8" metalness={0.8} roughness={0.3} />
       </instancedMesh>
       <instancedMesh ref={head} args={[headGeo, undefined, m.heads.length]} frustumCulled={false}>
-        <meshStandardMaterial color="#CBD5E1" emissive="#FFF1D6" emissiveIntensity={1.2} metalness={0.6} roughness={0.3} toneMapped={false} />
+        <meshStandardMaterial color="#CBD5E1" emissive="#FFF1D6" emissiveIntensity={night ? 6 : 1.2} metalness={0.6} roughness={0.3} toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={cctvPole} args={[undefined, undefined, m.cctvPoles.length]} castShadow frustumCulled={false}>
         <cylinderGeometry args={[0.06, 0.08, 6, 8]} />

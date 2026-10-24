@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { PerformanceMonitor, Stats } from '@react-three/drei'
 import { useQueryClient } from '@tanstack/react-query'
 import * as THREE from 'three'
-import type { Equipment, InventoryLot, Shipment, WarehouseLayout } from '../data/schemas'
+import type { Disruption, Equipment, InventoryLot, RecoveryBundle, Shipment, WarehouseLayout } from '../data/schemas'
 import { getProvider, twinKeys } from '../hooks/useTwinData'
 import { effectiveTier, useTwinStore, type QualitySetting, type QualityTier } from '../store/twinStore'
 import { getSceneParams } from '../world/sceneParams'
@@ -20,13 +20,27 @@ import { Interaction, type HoverTarget } from './Interaction'
 import { Inventory } from './Inventory'
 import { Racks } from './Racks'
 import { ZoneProps } from './ZoneProps'
+import { Vehicles } from './Vehicles'
+import { People } from './People'
+import { RecoveryOverlay } from './RecoveryOverlay'
+import { Rain } from './Weather'
+import { WalkMode } from './WalkMode'
+import { entityPositions, sceneStats } from './registry'
+import { buildNavGraph } from '../world/navGraph'
+import { deriveWorkers } from '../world/poses'
+import type { TimeOfDay, Weather } from '../store/twinStore'
 import { Yard } from './Yard'
 
 export interface WarehouseCanvasProps {
   layout: WarehouseLayout
   shipments: Shipment[]
+  /** Inventory to draw (current, or the recorded outcome in the After view) */
   lots: InventoryLot[]
+  /** Current inventory, used to decide whether proposals have landed */
+  currentLots: InventoryLot[]
   equipment: Equipment[]
+  disruptions: Disruption[]
+  recovery: RecoveryBundle | null
   /** LIVE data older than the staleness threshold; equipment stops animating from it */
   stale: boolean
   onContextLost: () => void
@@ -35,7 +49,7 @@ export interface WarehouseCanvasProps {
 
 const TIER_ORDER: QualityTier[] = ['low', 'medium', 'high']
 
-export default function WarehouseCanvas({ layout, shipments, lots, equipment, stale, onContextLost, onContextRestored }: WarehouseCanvasProps) {
+export default function WarehouseCanvas({ layout, shipments, lots, currentLots, equipment, disruptions, recovery, stale, onContextLost, onContextRestored }: WarehouseCanvasProps) {
   const { seed, debug, freeze } = getSceneParams()
   const plan = useMemo(() => buildSitePlan(layout, seed), [layout, seed])
   const quality = useTwinStore(s => s.quality)
@@ -46,7 +60,23 @@ export default function WarehouseCanvas({ layout, shipments, lots, equipment, st
   const highlightSku = useTwinStore(s => s.highlightSku)
   const selectedEntity = useTwinStore(s => s.selectedEntity)
   const [hover, setHover] = useState<HoverTarget>(null)
-  const parkingBays = useMemo(() => equipment.map(e => e.home), [equipment])
+  const homesKey = equipment.map(e => `${e.id}:${e.home.x},${e.home.z}`).join('|')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const parkingBays = useMemo(() => equipment.filter(e => e.type !== 'conveyor').map(e => e.home), [homesKey])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const graph = useMemo(() => buildNavGraph(layout, plan, equipment.filter(e => e.type !== 'conveyor').map(e => ({ id: e.id, x: e.home.x, z: e.home.z }))), [layout, plan, homesKey])
+  const ambient = useTwinStore(s => s.ambientStaff)
+  const viewMode = useTwinStore(s => s.viewMode)
+  const walk = useTwinStore(s => s.walk)
+  const weather = useTwinStore(s => s.weather)
+  const timeOfDay = useTwinStore(s => s.timeOfDay)
+  const workers = useMemo(() => deriveWorkers(equipment, shipments, layout, plan, ambient), [equipment, shipments, layout, plan, ambient])
+
+  const onSelectMoving = useCallback((kind: 'equipment' | 'shipment' | 'worker', id: string) => {
+    const s = useTwinStore.getState()
+    s.selectEntity({ kind, id })
+    s.setFollow({ kind, id })
+  }, [])
 
   const onSelectRack = useCallback((rackId: string) => {
     const rack = layout.racks.find(r => r.id === rackId)
@@ -108,7 +138,7 @@ export default function WarehouseCanvas({ layout, shipments, lots, equipment, st
       onCreated={({ gl }) => {
         const el = gl.domElement
         el.setAttribute('role', 'img')
-        el.setAttribute('aria-label', `3D view of ${layout.name}: racks, stock, docks and yard. Every action here is also available from the panels; keys 1 to 6 change the view.`)
+        el.setAttribute('aria-label', `3D view of ${layout.name}: racks, stock, docks and yard. Every action here is also available from the panels. Keys 1 to 6 change the view; W A S D or the arrow keys move, Q and E turn, R and F zoom.`)
         el.addEventListener('webglcontextlost', e => {
           e.preventDefault()
           onContextLost()
@@ -126,6 +156,22 @@ export default function WarehouseCanvas({ layout, shipments, lots, equipment, st
       <ZoneProps layout={layout} plan={plan} parkingBays={parkingBays} />
       <Racks layout={layout} clearHeight={plan.heights.clear} />
       <Inventory layout={layout} lots={lots} highlightSku={highlightSku} onPick={onSelectPosition} onHover={onHoverPosition} />
+      <Vehicles
+        layout={layout}
+        plan={plan}
+        graph={graph}
+        equipment={equipment}
+        shipments={shipments}
+        stale={stale}
+        onSelectEquipment={id => onSelectMoving('equipment', id)}
+        onSelectShipment={id => onSelectMoving('shipment', id)}
+      />
+      <People workers={workers} onSelect={id => onSelectMoving('worker', id)} />
+      <RecoveryOverlay layout={layout} plan={plan} lots={currentLots} disruptions={disruptions} recovery={recovery} shipments={shipments} viewMode={viewMode} />
+      {weather === 'rain' && <Rain plan={plan} />}
+      {walk && <WalkMode layout={layout} plan={plan} bays={parkingBays} />}
+      <FollowMarker />
+      <DrawCallCounter />
       <Interaction
         layout={layout}
         lots={lots}
@@ -139,12 +185,48 @@ export default function WarehouseCanvas({ layout, shipments, lots, equipment, st
         onSelectDock={onSelectDock}
       />
       <CameraRig plan={plan} />
-      <StaticShadows deps={[tier, layout, cutaway, lots]} />
+      <StaticShadows deps={[tier, layout, cutaway, lots, timeOfDay, weather]} />
       <SceneReady />
       {import.meta.env.DEV || debug ? <DevHook presets={plan.presets.map(p => p.id)} layout={layout} onSelectPosition={onSelectPosition} onSelectDock={onSelectDock} /> : null}
       {debug && <Stats />}
     </Canvas>
   )
+}
+
+/** Ring and tag under the entity the camera follows. */
+function FollowMarker() {
+  const follow = useTwinStore(s => s.follow)
+  const ring = useRef<THREE.Mesh>(null)
+  useFrame(() => {
+    const p = follow ? entityPositions.get(follow.id) : undefined
+    if (!ring.current) return
+    ring.current.visible = !!p
+    if (p) ring.current.position.set(p.x, p.y - 0.95, p.z)
+  })
+  return (
+    <mesh ref={ring} rotation-x={-Math.PI / 2} visible={false} renderOrder={12}>
+      <ringGeometry args={[1.5, 1.75, 48]} />
+      <meshBasicMaterial color="#1F4FD8" transparent opacity={0.85} depthTest={false} toneMapped={false} />
+    </mesh>
+  )
+}
+
+/** Counts draw calls over a whole frame (all composer passes included). */
+export const frameStats = { calls: 0, triangles: 0 }
+function DrawCallCounter() {
+  const gl = useThree(s => s.gl)
+  useEffect(() => {
+    gl.info.autoReset = false
+    return () => {
+      gl.info.autoReset = true
+    }
+  }, [gl])
+  useFrame(() => {
+    frameStats.calls = gl.info.render.calls
+    frameStats.triangles = gl.info.render.triangles
+    gl.info.reset()
+  })
+  return null
 }
 
 /** Static geometry: render the shadow map on demand instead of every frame. */
@@ -189,7 +271,12 @@ export interface SR3DHook {
     shadowMaps: number
     shadowCasters: number
     shadowsEnabled: boolean
+    /** Draw calls of the last full frame */
+    frameCalls: number
   }
+  setTimeOfDay: (t: TimeOfDay) => void
+  setWeather: (w: Weather) => void
+  entityPosition: (id: string) => [number, number, number] | null
   setPreset: (id: CameraPresetId) => void
   setQuality: (q: QualitySetting) => void
   /** Same path as clicking the position in 3D: selects it and frames it */
@@ -209,6 +296,13 @@ export interface SR3DHook {
     equipment: number
     workers: number
     ghosts: number
+    solidActions: number
+    trucks: number
+    activeEquipment: number
+    delayBeacons: number
+    shortageMarkers: number
+    viewMode: string
+    follow: string | null
     selectedPosition: string | null
     selectedRack: string | null
     selectedEntity: string | null
@@ -255,7 +349,14 @@ function DevHook({ presets, layout, onSelectPosition, onSelectDock }: DevHookPro
           shadowMaps,
           shadowCasters,
           shadowsEnabled: gl.shadowMap.enabled,
+          frameCalls: frameStats.calls,
         }
+      },
+      setTimeOfDay: t => useTwinStore.getState().setTimeOfDay(t),
+      setWeather: w => useTwinStore.getState().setWeather(w),
+      entityPosition: id => {
+        const v = entityPositions.get(id)
+        return v ? [v.x, v.y, v.z] : null
       },
       setPreset: id => {
         if (presets.includes(id)) useTwinStore.getState().setPreset(id)
@@ -299,9 +400,15 @@ function DevHook({ presets, layout, onSelectPosition, onSelectDock }: DevHookPro
           ready: s.sceneReady,
           lots,
           equipment,
-          // Workers and ghost pallets are rendered from Stage 3/4 onwards
-          workers: 0,
-          ghosts: 0,
+          workers: sceneStats.workers,
+          ghosts: sceneStats.ghosts,
+          solidActions: sceneStats.solidActions,
+          trucks: sceneStats.trucks,
+          activeEquipment: sceneStats.activeEquipment,
+          delayBeacons: sceneStats.delayBeacons,
+          shortageMarkers: sceneStats.shortageMarkers,
+          viewMode: s.viewMode,
+          follow: s.follow?.id ?? null,
           selectedPosition: s.selection.positionId,
           selectedRack: s.selection.rackId,
           selectedEntity: s.selectedEntity?.id ?? null,
@@ -311,6 +418,7 @@ function DevHook({ presets, layout, onSelectPosition, onSelectDock }: DevHookPro
       stepSim: async n => {
         if (useTwinStore.getState().mode !== 'simulation') return
         const sim = getProvider('simulation')
+        sim.pause()
         for (let i = 0; i < n; i++) await sim.step()
       },
     }

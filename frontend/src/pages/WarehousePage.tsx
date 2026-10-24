@@ -23,6 +23,7 @@ import {
   useShipments,
   useSimulation,
   useTwinEventStream,
+  useRecordedOutcome,
 } from '@/features/warehouse-twin/hooks/useTwinData'
 import { useTwinStore } from '@/features/warehouse-twin/store/twinStore'
 import { buildSitePlan } from '@/features/warehouse-twin/world/sitePlan'
@@ -62,13 +63,17 @@ import {
   useStaleness,
   ViewControls,
   WebGLRequired,
+  SceneOptions,
+  Tracker,
+  type TrackerStep,
 } from '@/features/warehouse-twin/ui/SceneHud'
+import { actionViews, planPhase, shownOption } from '@/features/warehouse-twin/world/planVisual'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 // The 3D chunk (three, fiber, drei, postprocessing) loads on demand
 const WarehouseCanvas = lazy(() => import('@/features/warehouse-twin/scene/WarehouseCanvas'))
 
-type BottomTab = 'events' | 'shipments' | 'equipment'
+type BottomTab = 'events' | 'shipments' | 'equipment' | 'disruptions'
 
 export function WarehousePage() {
   useTwinEventStream()
@@ -112,6 +117,9 @@ export function WarehousePage() {
     return list.length > 0 ? list[list.length - 1] : null
   }, [disruptions.data])
   const recovery = useRecovery(activeDisruption?.id ?? null)
+  const outcome = useRecordedOutcome()
+  const viewMode = useTwinStore(s => s.viewMode)
+  const requestTour = useTwinStore(s => s.requestTour)
 
   const lots = useMemo(() => inventory.data ?? [], [inventory.data])
   const { byPosition } = useMemo(() => indexLotsByPosition(lots), [lots])
@@ -257,6 +265,69 @@ export function WarehousePage() {
   }), [])
   const planForApproval = recovery.data?.plan ?? null
 
+  // ── Recovery plan state (Stage 4) ──
+  const planViews = useMemo(() => {
+    const b = recovery.data
+    if (!b?.plan) return []
+    return actionViews(b.plan, shownOption(b.plan, b.approvals), lots)
+  }, [recovery.data, lots])
+  const phase = recovery.data?.plan ? planPhase(recovery.data.plan, planViews) : null
+  const completed = phase === 'completed'
+  const afterAvailable = completed || (mode === 'simulation' && !!outcome.data && !!recovery.data?.plan)
+  const afterLabel = completed ? 'After: plan completed (current inventory)' : 'After: recorded result of the simulation scenario'
+  const displayLots = viewMode === 'after' && afterAvailable && !completed && outcome.data ? outcome.data : lots
+
+  const showImpact = useCallback(() => {
+    if (!layout.data) return
+    const poses = planViews.flatMap(v => {
+      const out = []
+      if (v.action.fromPositionId) {
+        const p = framePosition(layout.data!, v.action.fromPositionId)
+        if (p) out.push(p)
+      } else if (v.action.dockId) {
+        const d = layout.data!.docks.find(x => x.id === v.action.dockId)
+        const p = d ? frameDock(layout.data!, d) : null
+        if (p) out.push(p)
+      }
+      const to = v.action.toPositionId ? framePosition(layout.data!, v.action.toPositionId) : null
+      if (to) out.push(to)
+      return out
+    })
+    if (poses.length) requestTour(poses)
+  }, [layout.data, planViews, requestTour])
+
+  const tracker = useMemo((): { title: string; subtitle?: string; steps: TrackerStep[]; footer?: React.ReactNode } | null => {
+    if (selectedEntity?.kind === 'shipment') {
+      const s = shipments.data?.find(x => x.id === selectedEntity.id)
+      if (s) return { title: `Shipment ${s.id}`, subtitle: `${s.supplier.name} · ${s.status.replace('_', ' ')}`, steps: s.milestones.map(m => ({ label: m.label, done: !!m.at, at: m.at })) }
+    }
+    const planData = recovery.data?.plan
+    if (!planData || !phase) return null
+    const order = ['proposed', 'awaiting_approval', 'executing', 'completed'] as const
+    const idx = phase === 'rejected' ? -1 : order.indexOf(phase)
+    const option = shownOption(planData, recovery.data!.approvals)
+    const impact = option?.impact
+    return {
+      title: `Recovery plan ${planData.id}`,
+      subtitle: phase === 'rejected' ? 'Rejected' : `${planViews.filter(v => v.state === 'completed').length}/${planViews.length} actions landed`,
+      steps: [
+        { label: 'Proposed', done: idx >= 0 },
+        { label: 'Awaiting approval', done: idx >= 1 },
+        { label: 'Approved / executing', done: idx >= 2 },
+        { label: 'Completed', done: idx >= 3 },
+      ],
+      footer: impact && (
+        <>
+          {impact.unitsMoved != null && <>Units moved <b>{impact.unitsMoved}</b> · </>}
+          {impact.skusProtected != null && <>SKUs protected <b>{impact.skusProtected}</b> · </>}
+          {impact.jobsProtected != null && <>Jobs protected <b>{impact.jobsProtected}</b> · </>}
+          {impact.riskBefore != null && impact.riskAfter != null && <>Risk <b>{Math.round(impact.riskBefore * 100)}% → {Math.round(impact.riskAfter * 100)}%</b></>}
+          {mode === 'simulation' && ' · simulated'}
+        </>
+      ),
+    }
+  }, [selectedEntity, shipments.data, recovery.data, phase, planViews, mode])
+
   const onContextLost = useCallback(() => setContextLost(true), [])
   const onContextRestored = useCallback(() => {
     setContextLost(false)
@@ -282,8 +353,11 @@ export function WarehousePage() {
               key={canvasKey}
               layout={layout.data}
               shipments={shipments.data ?? []}
-              lots={lots}
+              lots={displayLots}
+              currentLots={lots}
               equipment={equipment.data ?? []}
+              disruptions={disruptions.data ?? []}
+              recovery={recovery.data ?? null}
               stale={stale}
               onContextLost={onContextLost}
               onContextRestored={onContextRestored}
@@ -317,6 +391,7 @@ export function WarehousePage() {
         <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2">
           {plan && <PresetBar presets={plan.presets} />}
           <ViewControls />
+          <SceneOptions afterAvailable={afterAvailable} afterLabel={afterLabel} canShowImpact={planViews.length > 0} onShowImpact={showImpact} />
         </div>
         <div className="pointer-events-auto flex flex-wrap items-center gap-2">
           <ModeBadge mode={mode} />
@@ -357,6 +432,9 @@ export function WarehousePage() {
           </div>
         )}
         {stale && ageMs != null && <div className="pointer-events-auto w-fit"><StaleNotice ageMs={ageMs} /></div>}
+        {viewMode === 'after' && afterAvailable && (
+          <div role="note" className="pointer-events-auto w-fit rounded-xl border border-[#BBF7D0] bg-[#F0FDF4]/95 px-3 py-1.5 text-xs font-medium text-[#166534]">{afterLabel}</div>
+        )}
         </div>
       </div>
 
@@ -486,6 +564,8 @@ export function WarehousePage() {
           </div>
         )}
 
+        {tracker && <Tracker {...tracker} />}
+
         <ul className={clsx('pointer-events-auto flex w-full max-w-[640px] flex-wrap gap-x-3 gap-y-1 rounded-xl px-3 py-2', glass)} aria-label="Status legend">
           {LEGEND_ORDER.map(st => (
             <li key={st} className="flex items-center gap-1 text-[11px] font-medium text-[#334155]" title={STATUS_STYLES[st].description}>
@@ -498,7 +578,7 @@ export function WarehousePage() {
 
         <section className={clsx('pointer-events-auto w-full max-w-[640px] overflow-hidden rounded-xl', glass)} aria-label="Live table">
           <div role="tablist" className="flex items-center gap-1 border-b border-[#E2E8F0]/80 p-1">
-            {(['events', 'shipments', 'equipment'] as const).map(t => (
+            {(['events', 'shipments', 'equipment', 'disruptions'] as const).map(t => (
               <button
                 key={t}
                 type="button"
@@ -521,6 +601,13 @@ export function WarehousePage() {
             <div role="tabpanel" className="max-h-56 overflow-y-auto bg-white/60">
               {tab === 'events' && <EventFeed events={events} mode={mode} isSelected={isEventSelected} onSelect={eventTarget} />}
               {tab === 'shipments' && <div className="p-3"><ShipmentsList query={shipments} mode={mode} selectedIds={selectedShipmentIds} onSelect={focusShipment} /></div>}
+              {tab === 'disruptions' && (
+                <div className="p-3">
+                  {(disruptions.data ?? []).length === 0
+                    ? <NoDisruption mode={mode} />
+                    : (disruptions.data ?? []).map(d => <DisruptionSummary key={d.id} disruption={d} mode={mode} />)}
+                </div>
+              )}
               {tab === 'equipment' && <div className="p-3"><EquipmentList query={equipment} selectedId={selectedEntity?.kind === 'equipment' ? selectedEntity.id : null} onSelect={focusEquipment} /></div>}
             </div>
           )}

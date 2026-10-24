@@ -84,7 +84,9 @@ def pos_ids(rack):
 
 # Positions kept empty because the scenario puts away recovered stock there
 RESERVED_DEST = {"A06-R05-L01-P01", "A06-R05-L01-P02", "A06-R05-L01-P03",
-                 "A02-R03-L01-P01", "A02-R03-L01-P02"}
+                 "A02-R03-L01-P01", "A02-R03-L01-P02",
+                 # Consolidation target for the recommended plan's reallocation action
+                 "A05-R02-L01-P03"}
 # Positions holding the two disrupted SKUs (motor: 35 total, steel frame: 22 total)
 FIXED = {
     "A05-R02-L01-P01": ("MTR-7.5KW-IE3", 15), "A05-R02-L01-P02": ("MTR-7.5KW-IE3", 12),
@@ -160,6 +162,11 @@ for e in equipment:
     e["currentTask"] = None
 
 shipments = [
+    # The failed supplier's inbound: stays Scheduled (no truck), flagged by the disruption
+    {"id": "SHP-87990", "supplier": sup("SUP-APEX"), "vehicleType": "container_truck", "dockId": "D01",
+     "status": "scheduled", "sku": "MTR-7.5KW-IE3", "qty": 100, "eta": ts(25, 8, 0),
+     "milestones": [{"label": "Scheduled", "at": ts(18, 11, 0)}, {"label": "At dock", "at": None},
+                    {"label": "Unloaded", "at": None}, {"label": "Departed", "at": None}]},
     {"id": "SHP-88012", "supplier": sup("SUP-VOLTA"), "vehicleType": "delivery_truck", "dockId": None,
      "status": "departed", "sku": "BRG-6205-2RS", "qty": 400, "eta": ts(22, 9, 30),
      "milestones": [{"label": "Scheduled", "at": ts(20, 8, 0)}, {"label": "At dock", "at": ts(22, 9, 34)},
@@ -234,6 +241,21 @@ options = [
      "sources": ["Supplier catalog: Volta Industrial Supply (spot quote)", "Compatibility agent: B35 vs B3 mount, unverified"]},
 ]
 
+# Concrete actions for the recommended option (rendered as AI proposals until executed)
+REALLOC_FROM, REALLOC_TO = "A07-R09-L02-P01", "A05-R02-L01-P03"
+def action(i, kind, sku, qty, label, frm=None, to=None, shipment=None, dock=None):
+    return {"id": f"ACT-{i}", "seq": i, "kind": kind, "sku": sku, "qty": qty, "label": label,
+            "fromPositionId": frm, "toPositionId": to, "shipmentId": shipment, "dockId": dock}
+options[0]["actions"] = [
+    action(1, "reallocate", "MTR-7.5KW-IE3", 8, "Consolidate 8 motors at the JOB-4471 pick face", frm=REALLOC_FROM, to=REALLOC_TO),
+    action(2, "inbound_putaway", "MTR-7.5KW-IE3", 25, "Put away Kestrel motors", to="A06-R05-L01-P01", shipment="SHP-90140", dock="D02"),
+    action(3, "inbound_putaway", "MTR-7.5KW-IE3", 20, "Put away Kestrel motors", to="A06-R05-L01-P02", shipment="SHP-90140", dock="D02"),
+    action(4, "inbound_putaway", "MTR-7.5KW-IE3", 20, "Put away Kestrel motors", to="A06-R05-L01-P03", shipment="SHP-90140", dock="D02"),
+    action(5, "inbound_putaway", "STL-ASM-FRAME-220", 20, "Put away Ironbridge frames", to="A02-R03-L01-P01", shipment="SHP-90141", dock="D03"),
+    action(6, "inbound_putaway", "STL-ASM-FRAME-220", 18, "Put away Ironbridge frames", to="A02-R03-L01-P02", shipment="SHP-90141", dock="D03"),
+]
+options[0]["impact"] = {"unitsMoved": 111, "skusProtected": 2, "jobsProtected": 3, "riskBefore": 0.82, "riskAfter": 0.18}
+
 plan_ready = {"id": "PLN-0142-1", "disruptionId": DSR, "status": "awaiting_approval", "options": options,
               "recommendedOptionId": "OPT-A", "generatedAt": "@now", "allocations": []}
 
@@ -269,8 +291,9 @@ def eq(eid, status, task):
     e = next(x for x in equipment if x["id"] == eid)
     return {"type": "equipment.task", "equipment": {**e, "status": status, "currentTask": task}}
 
-def task(tid, kind, desc, frm=None, to=None):
-    return {"id": tid, "kind": kind, "description": desc, "fromPositionId": frm, "toPositionId": to}
+def task(tid, kind, desc, frm=None, to=None, dock=None, zone=None):
+    return {"id": tid, "kind": kind, "description": desc, "fromPositionId": frm, "toPositionId": to,
+            "dockId": dock, "zoneId": zone}
 
 steps = [
     {"id": "disruption", "label": "Supplier failure reported", "delayMs": 1500, "events": [
@@ -321,13 +344,13 @@ steps = [
         {"type": "dock.status", "dockId": "D03", "status": "occupied"}]},
     {"id": "unloading", "label": "Unloading", "delayMs": 3500, "events": [
         shp(shp_motor, "unloading", 2), shp(shp_steel, "unloading", 2),
-        eq("FL-01", "active", task("TSK-1", "unload", "Unload SHP-90140 at Dock 2 to receiving lane")),
-        eq("FL-02", "active", task("TSK-2", "unload", "Unload SHP-90141 at Dock 3 to receiving lane")),
+        eq("FL-01", "active", task("TSK-1", "unload", "Unload SHP-90140 at Dock 2 to receiving lane", dock="D02")),
+        eq("FL-02", "active", task("TSK-2", "unload", "Unload SHP-90141 at Dock 3 to receiving lane", dock="D03")),
         eq("CV-01", "active", task("TSK-3", "convey", "Carton flow to scanning station"))]},
     {"id": "inspection", "label": "Quality inspection", "delayMs": 3500, "events": [
         shp(shp_motor, "unloading", 3), shp(shp_steel, "unloading", 3),
         eq("FL-01", "idle", None), eq("FL-02", "idle", None), eq("CV-01", "idle", None),
-        eq("TR-01", "active", task("TSK-4", "inspect", "Move samples to quality station"))],
+        eq("TR-01", "active", task("TSK-4", "inspect", "Move samples to quality station", zone="Z-INS"))],
      "audit": {"actor": "qc.station (operator)", "action": "inspection.passed", "entity": "shipment", "entityId": "SHP-90140",
                "detail": "65/65 motors and 38/38 frames passed visual & nameplate check"}},
     {"id": "putaway", "label": "Putaway", "delayMs": 3500, "events": [
@@ -336,12 +359,16 @@ steps = [
         {"type": "dock.status", "dockId": "D03", "status": "available"},
         eq("TR-01", "idle", None),
         eq("RT-01", "active", task("TSK-5", "putaway", "Put away 65 motors to A06-R05-L01", None, "A06-R05-L01-P01")),
-        eq("FL-02", "active", task("TSK-6", "putaway", "Put away 38 frames to A02-R03-L01", None, "A02-R03-L01-P01"))]},
+        eq("FL-02", "active", task("TSK-6", "putaway", "Put away 38 frames to A02-R03-L01", None, "A02-R03-L01-P01")),
+        eq("OP-01", "active", task("TSK-7", "reallocate", f"Consolidate 8 motors {REALLOC_FROM} to {REALLOC_TO}", REALLOC_FROM, REALLOC_TO))]},
     {"id": "inventory", "label": "Inventory updated after verified receipt", "delayMs": 3000, "events": [
         *[incoming_lot(i, a, "reserved", a["qty"]) for i, a in enumerate(allocs)],
-        *restatus(motor_lots, "reserved"), *restatus(steel_lots, "reserved"),
+        # The consolidated lot lands at its new position only with the verified receipt
+        *[{"type": "inventory.updated", "lot": {**l, "status": "reserved",
+            "positionId": REALLOC_TO if l["positionId"] == REALLOC_FROM else l["positionId"]}} for l in motor_lots],
+        *restatus(steel_lots, "reserved"),
         shp(shp_motor, "departed", 5), shp(shp_steel, "departed", 5),
-        eq("RT-01", "idle", None), eq("FL-02", "idle", None),
+        eq("RT-01", "idle", None), eq("FL-02", "idle", None), eq("OP-01", "idle", None),
         {"type": "recovery.updated", "plan": {**plan_ready, "status": "approved", "allocations": alloc_status("put_away")}},
         {"type": "disruption.created", "disruption": {**disruption, "status": "resolved", "availableQty": 100}}],
      "audit": {"actor": "wms (receipt verification)", "action": "receipt.verified", "entity": "disruption", "entityId": DSR,

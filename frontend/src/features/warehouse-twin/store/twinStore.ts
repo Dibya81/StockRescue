@@ -5,9 +5,16 @@ import type { SimState } from '../data/simProvider'
 import type { CameraPose, CameraPresetId } from '../world/sitePlan'
 
 export interface SelectedEntity {
-  kind: 'dock' | 'shipment' | 'equipment'
+  kind: 'dock' | 'shipment' | 'equipment' | 'worker'
   id: string
 }
+
+export type ViewMode = 'before' | 'proposed' | 'after'
+export type TimeOfDay = 'day' | 'golden' | 'night'
+export type Weather = 'clear' | 'rain' | 'fog'
+
+/** Key for when an entity entered its current state (from stream events) */
+export const startKey = (kind: 'equipment' | 'shipment', id: string, state: string) => `${kind}:${id}:${state}`
 
 const MODE_KEY = 'stockrescue_twin_mode'
 const EVENT_LOG_LIMIT = 150
@@ -56,6 +63,17 @@ interface TwinState {
   /** A non-position object selected in 3D or in the live table */
   selectedEntity: SelectedEntity | null
   cameraRequest: { nonce: number; pose: CameraPose; cutaway: boolean } | null
+  /** Camera follows this moving entity */
+  follow: SelectedEntity | null
+  viewMode: ViewMode
+  tour: { nonce: number; poses: CameraPose[] } | null
+  timeOfDay: TimeOfDay
+  weather: Weather
+  walk: boolean
+  /** Decorative staff on walkways; off by default and labelled */
+  ambientStaff: boolean
+  /** Wall-clock ms when an equipment task / shipment status began, from events */
+  startedAt: Record<string, number>
   cutaway: boolean
   quality: QualitySetting
   autoTier: QualityTier
@@ -79,6 +97,13 @@ interface TwinState {
   selectEntity: (entity: SelectedEntity | null) => void
   /** Fly the camera to a pose (row-to-camera sync, search, selection) */
   requestCamera: (pose: CameraPose, cutaway?: boolean) => void
+  setFollow: (e: SelectedEntity | null) => void
+  setViewMode: (m: ViewMode) => void
+  requestTour: (poses: CameraPose[]) => void
+  setTimeOfDay: (t: TimeOfDay) => void
+  setWeather: (w: Weather) => void
+  setWalk: (on: boolean) => void
+  setAmbientStaff: (on: boolean) => void
   setCutaway: (on: boolean) => void
   setQuality: (q: QualitySetting) => void
   setAutoTier: (t: QualityTier) => void
@@ -101,6 +126,14 @@ export const useTwinStore = create<TwinState>(set => ({
   entryNonce: 0,
   selectedEntity: null,
   cameraRequest: null,
+  follow: null,
+  viewMode: 'proposed',
+  tour: null,
+  timeOfDay: 'day',
+  weather: 'clear',
+  walk: false,
+  ambientStaff: false,
+  startedAt: {},
   cutaway: false,
   quality: 'auto',
   autoTier: 'medium',
@@ -113,7 +146,7 @@ export const useTwinStore = create<TwinState>(set => ({
     } catch {
       // storage unavailable
     }
-    set({ mode, selection: NO_SELECTION, selectedEntity: null, highlightSku: null, events: [], sim: null, connection: 'connecting', lastEventAt: null })
+    set({ mode, selection: NO_SELECTION, selectedEntity: null, follow: null, highlightSku: null, events: [], sim: null, connection: 'connecting', lastEventAt: null, startedAt: {} })
   },
   selectRack: rackId => set({ selection: { rackId, level: null, positionId: null }, selectedEntity: null }),
   selectLevel: level => set(s => ({ selection: { ...s.selection, level, positionId: null } })),
@@ -127,17 +160,35 @@ export const useTwinStore = create<TwinState>(set => ({
   },
   clearSelection: () => set({ selection: NO_SELECTION }),
   selectEntity: entity => set(s => ({ selectedEntity: entity, selection: entity ? NO_SELECTION : s.selection })),
+  setFollow: follow => set({ follow }),
+  setViewMode: viewMode => set({ viewMode }),
+  requestTour: poses => set(s => ({ tour: { nonce: (s.tour?.nonce ?? 0) + 1, poses } })),
+  setTimeOfDay: timeOfDay => set({ timeOfDay }),
+  setWeather: weather => set({ weather }),
+  setWalk: walk => set({ walk, follow: null }),
+  setAmbientStaff: ambientStaff => set({ ambientStaff }),
   requestCamera: (pose, cutaway = false) =>
     set(s => ({ cameraRequest: { nonce: (s.cameraRequest?.nonce ?? 0) + 1, pose, cutaway } })),
   setHighlightSku: highlightSku => set({ highlightSku }),
   setConnection: connection => set({ connection }),
   setSim: sim => set({ sim }),
   pushEvent: event =>
-    set(s => ({
-      events: [{ seq: ++eventSeq, mode: s.mode, event }, ...s.events].slice(0, EVENT_LOG_LIMIT),
-      lastEventAt: Date.now(),
-    })),
-  clearEvents: () => set({ events: [] }),
+    set(s => {
+      const at = Date.parse(event.at) || Date.now()
+      let startedAt = s.startedAt
+      // Record only the first time an entity enters a state, so re-delivered events are idempotent
+      const mark = (key: string) => {
+        if (startedAt[key] === undefined) startedAt = { ...startedAt, [key]: at }
+      }
+      if (event.type === 'equipment.task' && event.equipment.currentTask) mark(startKey('equipment', event.equipment.id, event.equipment.currentTask.id))
+      if (event.type === 'shipment.status') mark(startKey('shipment', event.shipment.id, event.shipment.status))
+      return {
+        events: [{ seq: ++eventSeq, mode: s.mode, event }, ...s.events].slice(0, EVENT_LOG_LIMIT),
+        lastEventAt: Date.now(),
+        startedAt,
+      }
+    }),
+  clearEvents: () => set({ events: [], startedAt: {} }),
   setPreset: preset => set(s => ({ preset, presetNonce: s.presetNonce + 1 })),
   setCinematic: cinematic => set({ cinematic }),
   requestEntry: () => set(s => ({ entryNonce: s.entryNonce + 1 })),

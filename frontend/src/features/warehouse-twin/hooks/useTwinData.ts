@@ -142,6 +142,17 @@ export function useAudit() {
   return useQuery({ queryKey: twinKeys.audit(provider.mode), queryFn: () => provider.getAudit(), ...queryOptions })
 }
 
+/** Simulation only: the scenario's recorded end state, for the After view. */
+export function useRecordedOutcome() {
+  const mode = useTwinStore(s => s.mode)
+  return useQuery<InventoryLot[]>({
+    queryKey: ['twin', 'simulation', 'outcome'],
+    queryFn: () => getProvider('simulation').getRecordedOutcome(),
+    enabled: mode === 'simulation',
+    staleTime: Infinity,
+  })
+}
+
 // ── Event stream → cache ─────────────────────────────────
 
 function patch<T>(qc: QueryClient, key: readonly unknown[], fn: (current: T) => T | null) {

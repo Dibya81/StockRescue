@@ -5,7 +5,7 @@ const PORT = 5199
 export default defineConfig({
   testDir: './e2e',
   // Software-rendered WebGL is slow; scenes take a while to build
-  timeout: 240_000,
+  timeout: 900_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,
