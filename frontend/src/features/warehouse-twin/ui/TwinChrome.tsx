@@ -204,21 +204,21 @@ export interface KpiItem {
   hint?: string
 }
 
-export function KpiStrip({ items }: { items: KpiItem[] }) {
+export function KpiStrip({ items, compact = false }: { items: KpiItem[]; compact?: boolean }) {
   return (
-    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+    <dl className={clsx('grid gap-2', compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6')}>
       {items.map((k, i) => (
         <div
           key={k.label}
-          className="animate-nav-item rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-3"
+          className={clsx('animate-nav-item rounded-xl border border-[#E2E8F0] bg-white', compact ? 'px-2.5 py-2' : 'px-3.5 py-3')}
           style={{ animationDelay: `${i * 40}ms` }}
           title={k.hint}
         >
-          <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">
+          <dt className={clsx('flex items-center gap-1.5 font-semibold uppercase tracking-wide text-[#64748B]', compact ? 'text-[9px]' : 'text-[11px]')}>
             {k.status && <StatusIcon status={k.status} className="h-3 w-3" />}
-            {k.label}
+            <span className="truncate-text">{k.label}</span>
           </dt>
-          <dd className="mt-1 font-mono text-xl font-semibold tabular-nums text-[#0F172A]">{k.value}</dd>
+          <dd className={clsx('mt-1 font-mono font-semibold tabular-nums text-[#0F172A]', compact ? 'text-base' : 'text-xl')}>{k.value}</dd>
         </div>
       ))}
     </dl>

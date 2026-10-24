@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { clsx } from 'clsx'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
@@ -31,6 +32,8 @@ export function AppShell() {
     })
   }, [])
   const closeMobile = useCallback(() => setMobileOpen(false), [])
+  // Full-screen views (the 3D warehouse) manage their own layout and scrolling
+  const fullBleed = pathname === '/warehouse' || pathname.startsWith('/warehouse/')
 
   // Close the drawer when navigating or growing to desktop
   const [drawerKey, setDrawerKey] = useState(`${pathname}|${isDesktop}`)
@@ -55,13 +58,16 @@ export function AppShell() {
           onMenuClick={() => setMobileOpen(true)}
         />
         <main
-          className="flex-1 overflow-y-auto"
+          className={clsx('flex-1', fullBleed ? 'overflow-hidden' : 'overflow-y-auto')}
           id="main-content"
           tabIndex={-1}
           aria-label="Main content"
         >
           {/* Keyed by route so every navigation replays the enter transition */}
-          <div key={pathname} className="animate-page-enter mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
+          <div
+            key={pathname}
+            className={clsx('animate-page-enter w-full', fullBleed ? 'h-full' : 'mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8')}
+          >
             <Outlet />
           </div>
         </main>

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { ConnectionState, DataMode } from '../data/provider'
 import type { TwinEvent } from '../data/schemas'
 import type { SimState } from '../data/simProvider'
+import type { CameraPresetId } from '../world/sitePlan'
 
 const MODE_KEY = 'stockrescue_twin_mode'
 const EVENT_LOG_LIMIT = 150
@@ -22,6 +23,9 @@ export interface Selection {
   positionId: string | null
 }
 
+export type QualityTier = 'low' | 'medium' | 'high'
+export type QualitySetting = QualityTier | 'auto'
+
 export interface LoggedEvent {
   seq: number
   mode: DataMode
@@ -36,6 +40,21 @@ interface TwinState {
   sim: SimState | null
   events: LoggedEvent[]
 
+  /** Scene view state */
+  preset: CameraPresetId
+  /** Bumps on every preset request so re-selecting the same preset re-frames */
+  presetNonce: number
+  /** True while the exterior → interior camera move is playing */
+  cinematic: boolean
+  /** Bumps when the HUD asks for the entry cinematic */
+  entryNonce: number
+  cutaway: boolean
+  quality: QualitySetting
+  autoTier: QualityTier
+  sceneReady: boolean
+  /** Wall-clock ms of the last stream event, for staleness */
+  lastEventAt: number | null
+
   setMode: (mode: DataMode) => void
   selectRack: (rackId: string | null) => void
   selectLevel: (level: number | null) => void
@@ -46,6 +65,13 @@ interface TwinState {
   setSim: (sim: SimState | null) => void
   pushEvent: (event: TwinEvent) => void
   clearEvents: () => void
+  setPreset: (preset: CameraPresetId) => void
+  setCinematic: (on: boolean) => void
+  requestEntry: () => void
+  setCutaway: (on: boolean) => void
+  setQuality: (q: QualitySetting) => void
+  setAutoTier: (t: QualityTier) => void
+  setSceneReady: (ready: boolean) => void
 }
 
 const NO_SELECTION: Selection = { rackId: null, level: null, positionId: null }
@@ -58,6 +84,15 @@ export const useTwinStore = create<TwinState>(set => ({
   connection: 'connecting',
   sim: null,
   events: [],
+  preset: 'exterior',
+  presetNonce: 0,
+  cinematic: false,
+  entryNonce: 0,
+  cutaway: false,
+  quality: 'auto',
+  autoTier: 'medium',
+  sceneReady: false,
+  lastEventAt: null,
 
   setMode: mode => {
     try {
@@ -65,7 +100,7 @@ export const useTwinStore = create<TwinState>(set => ({
     } catch {
       // storage unavailable
     }
-    set({ mode, selection: NO_SELECTION, highlightSku: null, events: [], sim: null, connection: 'connecting' })
+    set({ mode, selection: NO_SELECTION, highlightSku: null, events: [], sim: null, connection: 'connecting', lastEventAt: null })
   },
   selectRack: rackId => set({ selection: { rackId, level: null, positionId: null } }),
   selectLevel: level => set(s => ({ selection: { ...s.selection, level, positionId: null } })),
@@ -84,6 +119,17 @@ export const useTwinStore = create<TwinState>(set => ({
   pushEvent: event =>
     set(s => ({
       events: [{ seq: ++eventSeq, mode: s.mode, event }, ...s.events].slice(0, EVENT_LOG_LIMIT),
+      lastEventAt: Date.now(),
     })),
   clearEvents: () => set({ events: [] }),
+  setPreset: preset => set(s => ({ preset, presetNonce: s.presetNonce + 1 })),
+  setCinematic: cinematic => set({ cinematic }),
+  requestEntry: () => set(s => ({ entryNonce: s.entryNonce + 1 })),
+  setCutaway: cutaway => set({ cutaway }),
+  setQuality: quality => set({ quality }),
+  setAutoTier: autoTier => set({ autoTier }),
+  setSceneReady: sceneReady => set({ sceneReady }),
 }))
+
+export const effectiveTier = (s: { quality: QualitySetting; autoTier: QualityTier }): QualityTier =>
+  s.quality === 'auto' ? s.autoTier : s.quality

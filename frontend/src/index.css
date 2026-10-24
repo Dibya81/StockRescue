@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────────────────
@@ -97,7 +96,7 @@
     --duration-enter:  400ms;
 
     /* Fonts */
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
 
     /* Spacing system */
@@ -213,6 +212,12 @@
   ::-webkit-scrollbar-thumb:hover {
     background: #94A3B8;
   }
+}
+
+/* Deterministic capture (?freeze=1): no UI animation or transition */
+.sr-freeze *, .sr-freeze *::before, .sr-freeze *::after {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* ─────────────────────────────────────────────────────────
