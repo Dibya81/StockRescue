@@ -4,7 +4,9 @@ import { clsx } from 'clsx'
 import { parsePositionId, rackPositionIds } from '../data/layoutGeometry'
 import { countByStatus, LEGEND_ORDER, positionStatus, STATUS_STYLES } from '../data/statusMapping'
 import type { DataMode } from '../data/provider'
-import type { InventoryLot, Rack } from '../data/schemas'
+import type { Dock, Equipment, InventoryLot, Rack, Shipment } from '../data/schemas'
+import type { SelectedEntity } from '../store/twinStore'
+import { isDockOpen } from '../world/sitePlan'
 import { useInventorySearch } from '../hooks/useTwinData'
 import { StatusChip, StatusIcon } from './StatusGlyph'
 import { PanelEmpty, PanelError, PanelLoading, SimulatedTag } from './TwinChrome'
@@ -130,8 +132,102 @@ export function InspectorHint() {
       <MapPin className="h-5 w-5 text-[#94A3B8]" aria-hidden="true" />
       <p className="text-sm font-medium text-[#334155]">Nothing selected</p>
       <p className="max-w-[240px] text-xs text-[#64748B]">
-        Click a rack on the floor plan, then a level and position, to inspect what is stored there.
+        Click a rack in the 3D view, then a level tab or a pallet position, to inspect what is stored there. Docks and live-table rows are selectable too.
       </p>
+    </div>
+  )
+}
+
+// ── Docks, shipments, equipment ──────────────────────────
+
+const titleCaseWords = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+export function EntityInspector({ entity, docks, shipments, equipment, mode }: {
+  entity: SelectedEntity
+  docks: Dock[]
+  shipments: Shipment[]
+  equipment: Equipment[]
+  mode: DataMode
+}) {
+  if (entity.kind === 'dock') {
+    const dock = docks.find(d => d.id === entity.id)
+    if (!dock) return <PanelEmpty title="Dock not in layout" detail={entity.id} />
+    const atDock = shipments.filter(s => s.dockId === dock.id)
+    const open = isDockOpen(dock, shipments)
+    return (
+      <div className="animate-fade-in flex flex-col gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">Dock</p>
+          <p className="text-base font-semibold text-[#0F172A]">{dock.label}</p>
+          <p className="text-xs text-[#64748B]">{titleCaseWords(dock.purpose)} · {titleCaseWords(dock.side)} wall</p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          <Field label="Dock status">{titleCaseWords(dock.status)}</Field>
+          <Field label="Door">{open ? 'Open (truck at dock)' : 'Closed'}</Field>
+        </dl>
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">Shipments assigned</p>
+          {atDock.length === 0 ? (
+            <p className="text-xs text-[#64748B]">No shipment record assigns this dock.</p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {atDock.map(s => (
+                <li key={s.id} className="flex items-center justify-between rounded-md bg-[#F8FAFC] px-2 py-1">
+                  <span className="font-mono">{s.id}</span>
+                  <span>{titleCaseWords(s.status)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {mode === 'simulation' && <SimulatedTag className="w-fit" />}
+      </div>
+    )
+  }
+  if (entity.kind === 'shipment') {
+    const s = shipments.find(x => x.id === entity.id)
+    if (!s) return <PanelEmpty title="Shipment not found" detail={entity.id} />
+    return (
+      <div className="animate-fade-in flex flex-col gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">Shipment</p>
+          <p className="font-mono text-base font-semibold text-[#0F172A]">{s.id}</p>
+          <p className="text-xs text-[#64748B]">{s.supplier.name}</p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          <Field label="Status">{titleCaseWords(s.status)}</Field>
+          <Field label="Vehicle">{titleCaseWords(s.vehicleType)}</Field>
+          <Field label="Dock">{s.dockId ?? 'No dock assigned'}</Field>
+          <Field label="ETA">{s.eta ? formatDateTime(s.eta) : 'Not provided'}</Field>
+          <Field label="Cargo">{s.sku ? `${s.qty ?? '—'} × ${s.sku}` : 'No cargo line on record'}</Field>
+        </dl>
+        <ol className="space-y-1 text-xs">
+          {s.milestones.map(m => (
+            <li key={m.label} className="flex justify-between">
+              <span className={m.at ? 'text-[#166534]' : 'text-[#94A3B8]'}>{m.label}</span>
+              <span className="text-[#64748B]">{m.at ? formatDateTime(m.at) : 'Pending'}</span>
+            </li>
+          ))}
+        </ol>
+        {mode === 'simulation' && <SimulatedTag className="w-fit" />}
+      </div>
+    )
+  }
+  const e = equipment.find(x => x.id === entity.id)
+  if (!e) return <PanelEmpty title="Equipment not found" detail={entity.id} />
+  return (
+    <div className="animate-fade-in flex flex-col gap-3">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">Equipment</p>
+        <p className="text-base font-semibold text-[#0F172A]">{e.label}</p>
+        <p className="font-mono text-xs text-[#64748B]">{e.id} · {titleCaseWords(e.type)}</p>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+        <Field label="Status">{e.status === 'idle' ? 'Parked' : titleCaseWords(e.status)}</Field>
+        <Field label="Task">{e.currentTask ? titleCaseWords(e.currentTask.kind) : 'None'}</Field>
+      </dl>
+      <p className="text-xs text-[#475569]">{e.currentTask?.description ?? 'No task assigned.'}</p>
+      {mode === 'simulation' && <SimulatedTag className="w-fit" />}
     </div>
   )
 }

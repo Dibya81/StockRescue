@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { WarehouseLayout } from '../data/schemas'
+import type { StatusGlyph } from '../data/statusMapping'
 import { createRng } from '../world/sceneParams'
 import { rectD, rectW, type Rect, type SitePlan } from '../world/sitePlan'
 import { BRAND_BLUE, SAFETY_YELLOW } from '../world/constants'
@@ -466,5 +467,177 @@ export function createScreenTexture(seed: number): THREE.CanvasTexture {
   ctx.beginPath()
   for (let x = 0; x <= 256; x += 16) ctx.lineTo(x, 130 - rng() * 30)
   ctx.stroke()
+  return finish(c, { srgb: true })
+}
+
+// ── Label atlas ──────────────────────────────────────────
+
+export interface AtlasCell {
+  key: string
+  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void
+}
+
+export interface Atlas {
+  texture: THREE.CanvasTexture
+  /** [u0, v0, u1, v1] for a cell key */
+  uv: (key: string) => [number, number, number, number]
+}
+
+/** Packs many small labels into one texture so they render in a single draw call. */
+export function createAtlas(cells: AtlasCell[], cellW: number, cellH: number): Atlas {
+  const cols = Math.max(1, Math.min(cells.length, Math.floor(4096 / cellW)))
+  const rows = Math.max(1, Math.ceil(cells.length / cols))
+  const [c, ctx] = canvas(cols * cellW, rows * cellH)
+  const index = new Map<string, number>()
+  cells.forEach((cell, i) => {
+    index.set(cell.key, i)
+    ctx.save()
+    ctx.translate((i % cols) * cellW, Math.floor(i / cols) * cellH)
+    ctx.beginPath()
+    ctx.rect(0, 0, cellW, cellH)
+    ctx.clip()
+    cell.draw(ctx, cellW, cellH)
+    ctx.restore()
+  })
+  const texture = finish(c, { srgb: true, anisotropy: 16 })
+  return {
+    texture,
+    uv: key => {
+      const i = index.get(key) ?? 0
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      return [col / cols, 1 - (row + 1) / rows, (col + 1) / cols, 1 - row / rows]
+    },
+  }
+}
+
+function hashString(s: string): number {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619)
+  return h >>> 0
+}
+
+/** Deterministic barcode-style bars for a string (decorative, not a scannable code). */
+export function drawBarcode(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, h: number) {
+  const rng = createRng(hashString(text))
+  ctx.fillStyle = '#111827'
+  let cx = x
+  while (cx < x + w) {
+    const bw = 1 + Math.floor(rng() * 3)
+    if (rng() > 0.45) ctx.fillRect(cx, y, bw, h)
+    cx += bw + 1
+  }
+}
+
+export function drawCellText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, opts: { color?: string; weight?: number; align?: CanvasTextAlign; maxW?: number } = {}) {
+  ctx.fillStyle = opts.color ?? '#0F172A'
+  ctx.textAlign = opts.align ?? 'left'
+  ctx.textBaseline = 'middle'
+  let s = size
+  ctx.font = `${opts.weight ?? 700} ${s}px ${FONT}`
+  while (opts.maxW && ctx.measureText(text).width > opts.maxW && s > 6) {
+    s -= 1
+    ctx.font = `${opts.weight ?? 700} ${s}px ${FONT}`
+  }
+  ctx.fillText(text, x, y)
+}
+
+// ── Status icons ─────────────────────────────────────────
+
+/** Round badge with a white glyph; the glyph shape carries meaning without colour. */
+export function createStatusIconTexture(glyph: StatusGlyph, color: string): THREE.CanvasTexture {
+  const S = 128
+  const [c, ctx] = canvas(S, S)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.beginPath()
+  ctx.arc(S / 2, S / 2, S / 2 - 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.arc(S / 2, S / 2, S / 2 - 9, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#FFFFFF'
+  ctx.fillStyle = '#FFFFFF'
+  ctx.lineWidth = 11
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  const p = (pts: [number, number][], close = false) => {
+    ctx.beginPath()
+    pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * S, y * S) : ctx.lineTo(x * S, y * S)))
+    if (close) ctx.closePath()
+  }
+  switch (glyph) {
+    case 'check': p([[0.3, 0.52], [0.44, 0.66], [0.71, 0.36]]); ctx.stroke(); break
+    case 'trend-down': p([[0.28, 0.36], [0.46, 0.54], [0.56, 0.44], [0.72, 0.62]]); ctx.stroke(); p([[0.6, 0.64], [0.73, 0.64], [0.73, 0.51]]); ctx.stroke(); break
+    case 'alert': p([[0.5, 0.3], [0.5, 0.56]]); ctx.stroke(); ctx.beginPath(); ctx.arc(0.5 * S, 0.7 * S, 7, 0, Math.PI * 2); ctx.fill(); break
+    case 'zap': p([[0.55, 0.22], [0.34, 0.54], [0.5, 0.54], [0.44, 0.78], [0.67, 0.44], [0.51, 0.44]], true); ctx.fill(); break
+    case 'lock':
+      ctx.fillRect(0.32 * S, 0.47 * S, 0.36 * S, 0.27 * S)
+      ctx.lineWidth = 9
+      ctx.beginPath(); ctx.arc(0.5 * S, 0.46 * S, 0.12 * S, Math.PI, 0); ctx.stroke(); break
+    case 'arrow-in': p([[0.5, 0.25], [0.5, 0.58]]); ctx.stroke(); p([[0.37, 0.46], [0.5, 0.59], [0.63, 0.46]]); ctx.stroke(); p([[0.3, 0.72], [0.7, 0.72]]); ctx.stroke(); break
+    case 'ban': ctx.beginPath(); ctx.arc(0.5 * S, 0.5 * S, 0.22 * S, 0, Math.PI * 2); ctx.stroke(); p([[0.35, 0.35], [0.65, 0.65]]); ctx.stroke(); break
+    case 'circle': ctx.beginPath(); ctx.arc(0.5 * S, 0.5 * S, 0.2 * S, 0, Math.PI * 2); ctx.stroke(); break
+  }
+  return finish(c, { srgb: true })
+}
+
+// ── Packaging surfaces ───────────────────────────────────
+
+export function createCartonTexture(seed: number): THREE.CanvasTexture {
+  const rng = createRng(seed + 31)
+  const [c, ctx] = canvas(256, 256)
+  ctx.fillStyle = '#C8A06A'
+  ctx.fillRect(0, 0, 256, 256)
+  speckle(ctx, 256, 256, rng, 1600, ['#B48A55', '#D6B07C'], 1)
+  // Three stacked tiers of two cartons, with seams and tape
+  ctx.strokeStyle = 'rgba(90,62,30,0.55)'
+  ctx.lineWidth = 3
+  for (const y of [85, 170]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y); ctx.stroke() }
+  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(128, 256); ctx.stroke()
+  ctx.fillStyle = 'rgba(214,190,150,0.9)'
+  for (const y of [0, 85, 170]) ctx.fillRect(0, y + 36, 256, 10)
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  for (const [x, y] of [[20, 52], [148, 52], [20, 137], [148, 137], [20, 222], [148, 222]]) ctx.fillRect(x, y, 40, 22)
+  return finish(c, { srgb: true })
+}
+
+export function createToteTexture(): THREE.CanvasTexture {
+  const [c, ctx] = canvas(128, 128)
+  ctx.fillStyle = '#2F5FCF'
+  ctx.fillRect(0, 0, 128, 128)
+  ctx.strokeStyle = 'rgba(10,25,70,0.55)'
+  ctx.lineWidth = 4
+  for (const y of [32, 64, 96]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(128, y); ctx.stroke() }
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+  ctx.lineWidth = 2
+  for (let x = 8; x < 128; x += 12) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 128); ctx.stroke() }
+  return finish(c, { srgb: true })
+}
+
+export function createSteelBundleTexture(): THREE.CanvasTexture {
+  const [c, ctx] = canvas(128, 128)
+  ctx.fillStyle = '#8B949E'
+  ctx.fillRect(0, 0, 128, 128)
+  ctx.strokeStyle = 'rgba(40,46,54,0.5)'
+  ctx.lineWidth = 2
+  for (let y = 0; y < 128; y += 16) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(128, y); ctx.stroke() }
+  ctx.fillStyle = '#334155'
+  for (const x of [24, 100]) ctx.fillRect(x, 0, 6, 128)
+  return finish(c, { srgb: true })
+}
+
+export function createPalletTexture(seed: number): THREE.CanvasTexture {
+  const rng = createRng(seed + 41)
+  const [c, ctx] = canvas(128, 128)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, 128, 128)
+  for (let i = 0; i < 5; i++) {
+    const y = 4 + i * 25
+    ctx.fillStyle = `hsl(32, 35%, ${68 + rng() * 10}%)`
+    ctx.fillRect(0, y, 128, 18)
+  }
+  ctx.fillStyle = 'rgba(60,40,20,0.6)'
+  for (let i = 0; i < 5; i++) ctx.fillRect(0, 22 + i * 25, 128, 7)
   return finish(c, { srgb: true })
 }

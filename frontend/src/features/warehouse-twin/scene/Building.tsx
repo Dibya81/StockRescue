@@ -342,7 +342,8 @@ export function Building({ layout, plan, cutaway }: BuildingProps) {
         <meshStandardMaterial color={BRAND_BLUE} metalness={0.2} roughness={0.45} />
       </instancedMesh>
 
-      {/* Sprinkler main and ducts under the trusses */}
+      {/* Sprinkler main and ducts under the trusses (hidden with the roof in cutaway) */}
+      <group visible={!cutaway}>
       <mesh position={[0, clear - 0.15, fp.minZ + rectD(fp) * 0.35]} rotation-z={Math.PI / 2}>
         <cylinderGeometry args={[0.08, 0.08, rectW(fp) - 1, 12]} />
         <meshStandardMaterial color="#B91C1C" roughness={0.45} metalness={0.3} />
@@ -356,6 +357,7 @@ export function Building({ layout, plan, cutaway }: BuildingProps) {
       <instancedMesh ref={stripRef} args={[stripGeo, undefined, stripMatrices.length]} frustumCulled={false}>
         <meshStandardMaterial color="#ffffff" emissive="#F5F8FF" emissiveIntensity={6} toneMapped={false} />
       </instancedMesh>
+      </group>
 
       {plan.openings.filter(o => o.kind === 'personnel').map(o => (
         <PersonnelEntrance key={o.id} opening={o} plan={plan} />

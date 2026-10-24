@@ -110,6 +110,18 @@ export function CameraRig({ plan }: { plan: SitePlan }) {
     void lookAt(exterior, false).then(() => runEntry(storage))
   }, [entryNonce, plan.presets, lookAt, runEntry])
 
+  // Fly-to requests from selection, search and the live table
+  const cameraRequest = useTwinStore(s => s.cameraRequest)
+  useEffect(() => {
+    if (!cameraRequest || !initialised.current) return
+    sequence.current++
+    const c = controlsRef.current
+    if (c) c.smoothTime = 0.45
+    if (useTwinStore.getState().cinematic) setCinematic(false)
+    if (cameraRequest.cutaway) useTwinStore.getState().setCutaway(true)
+    void lookAt(cameraRequest.pose, animate())
+  }, [cameraRequest, lookAt, animate, setCinematic])
+
   // Hotkeys 1-6, Esc steps back one level
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,6 +133,7 @@ export function CameraRig({ plan }: { plan: SitePlan }) {
         if (s.selection.positionId) return s.selectPosition(null)
         if (s.selection.level != null) return s.selectLevel(null)
         if (s.selection.rackId) return s.clearSelection()
+        if (s.selectedEntity) return s.selectEntity(null)
         return
       }
       const p = plan.presets.find(x => x.hotkey === e.key)

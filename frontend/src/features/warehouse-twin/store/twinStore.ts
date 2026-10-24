@@ -2,7 +2,12 @@ import { create } from 'zustand'
 import type { ConnectionState, DataMode } from '../data/provider'
 import type { TwinEvent } from '../data/schemas'
 import type { SimState } from '../data/simProvider'
-import type { CameraPresetId } from '../world/sitePlan'
+import type { CameraPose, CameraPresetId } from '../world/sitePlan'
+
+export interface SelectedEntity {
+  kind: 'dock' | 'shipment' | 'equipment'
+  id: string
+}
 
 const MODE_KEY = 'stockrescue_twin_mode'
 const EVENT_LOG_LIMIT = 150
@@ -48,6 +53,9 @@ interface TwinState {
   cinematic: boolean
   /** Bumps when the HUD asks for the entry cinematic */
   entryNonce: number
+  /** A non-position object selected in 3D or in the live table */
+  selectedEntity: SelectedEntity | null
+  cameraRequest: { nonce: number; pose: CameraPose; cutaway: boolean } | null
   cutaway: boolean
   quality: QualitySetting
   autoTier: QualityTier
@@ -68,6 +76,9 @@ interface TwinState {
   setPreset: (preset: CameraPresetId) => void
   setCinematic: (on: boolean) => void
   requestEntry: () => void
+  selectEntity: (entity: SelectedEntity | null) => void
+  /** Fly the camera to a pose (row-to-camera sync, search, selection) */
+  requestCamera: (pose: CameraPose, cutaway?: boolean) => void
   setCutaway: (on: boolean) => void
   setQuality: (q: QualitySetting) => void
   setAutoTier: (t: QualityTier) => void
@@ -88,6 +99,8 @@ export const useTwinStore = create<TwinState>(set => ({
   presetNonce: 0,
   cinematic: false,
   entryNonce: 0,
+  selectedEntity: null,
+  cameraRequest: null,
   cutaway: false,
   quality: 'auto',
   autoTier: 'medium',
@@ -100,9 +113,9 @@ export const useTwinStore = create<TwinState>(set => ({
     } catch {
       // storage unavailable
     }
-    set({ mode, selection: NO_SELECTION, highlightSku: null, events: [], sim: null, connection: 'connecting', lastEventAt: null })
+    set({ mode, selection: NO_SELECTION, selectedEntity: null, highlightSku: null, events: [], sim: null, connection: 'connecting', lastEventAt: null })
   },
-  selectRack: rackId => set({ selection: { rackId, level: null, positionId: null } }),
+  selectRack: rackId => set({ selection: { rackId, level: null, positionId: null }, selectedEntity: null }),
   selectLevel: level => set(s => ({ selection: { ...s.selection, level, positionId: null } })),
   selectPosition: positionId => {
     if (!positionId) {
@@ -110,9 +123,12 @@ export const useTwinStore = create<TwinState>(set => ({
       return
     }
     const [aisle, rack, level] = positionId.split('-')
-    set({ selection: { rackId: `${aisle}-${rack}`, level: Number(level.slice(1)), positionId } })
+    set({ selection: { rackId: `${aisle}-${rack}`, level: Number(level.slice(1)), positionId }, selectedEntity: null })
   },
   clearSelection: () => set({ selection: NO_SELECTION }),
+  selectEntity: entity => set(s => ({ selectedEntity: entity, selection: entity ? NO_SELECTION : s.selection })),
+  requestCamera: (pose, cutaway = false) =>
+    set(s => ({ cameraRequest: { nonce: (s.cameraRequest?.nonce ?? 0) + 1, pose, cutaway } })),
   setHighlightSku: highlightSku => set({ highlightSku }),
   setConnection: connection => set({ connection }),
   setSim: sim => set({ sim }),

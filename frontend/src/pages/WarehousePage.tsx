@@ -7,7 +7,12 @@ import {
   parsePositionId,
   totalPositions,
 } from '@/features/warehouse-twin/data/layoutGeometry'
-import { countByStatus, rollupStatus } from '@/features/warehouse-twin/data/statusMapping'
+import { countByStatus, LEGEND_ORDER, rollupStatus, STATUS_STYLES } from '@/features/warehouse-twin/data/statusMapping'
+import type { Equipment, Shipment } from '@/features/warehouse-twin/data/schemas'
+import { layoutToWorld, type Vec3 } from '@/features/warehouse-twin/world/layoutToWorld'
+import { frameDock, frameFloorPoint, frameLevel, framePoints, framePosition, frameRack } from '@/features/warehouse-twin/world/framing'
+import { StatusIcon, StatusSwatch } from '@/features/warehouse-twin/ui/StatusGlyph'
+import type { LoggedEvent } from '@/features/warehouse-twin/store/twinStore'
 import {
   useActor,
   useDisruptions,
@@ -24,7 +29,7 @@ import { buildSitePlan } from '@/features/warehouse-twin/world/sitePlan'
 import { getSceneParams } from '@/features/warehouse-twin/world/sceneParams'
 import { FloorPlan, type RackSummary } from '@/features/warehouse-twin/ui/FloorPlan'
 import { RackElevation } from '@/features/warehouse-twin/ui/RackElevation'
-import { InspectorHint, PositionInspector, RackSummaryInspector, SkuSearch } from '@/features/warehouse-twin/ui/Inspector'
+import { EntityInspector, InspectorHint, PositionInspector, RackSummaryInspector, SkuSearch } from '@/features/warehouse-twin/ui/Inspector'
 import {
   DisruptionSummary,
   EquipmentList,
@@ -81,6 +86,9 @@ export function WarehousePage() {
   const events = useTwinStore(s => s.events)
   const sceneReady = useTwinStore(s => s.sceneReady)
   const cinematic = useTwinStore(s => s.cinematic)
+  const selectedEntity = useTwinStore(s => s.selectedEntity)
+  const selectEntity = useTwinStore(s => s.selectEntity)
+  const requestCamera = useTwinStore(s => s.requestCamera)
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const [webgl] = useState(detectWebGL)
@@ -159,7 +167,94 @@ export function WarehousePage() {
   }, [layout.data, lots, byPosition])
 
   const selectedRack = layout.data?.racks.find(r => r.id === selection.rackId) ?? null
-  const onHighlight = useCallback((sku: string | null) => setHighlightSku(sku), [setHighlightSku])
+  // ── Selection from panels moves the 3D camera, same as clicking in 3D ──
+  const focusPosition = useCallback((pid: string) => {
+    selectPosition(pid)
+    const pose = layout.data ? framePosition(layout.data, pid) : null
+    if (pose) requestCamera(pose)
+  }, [layout.data, selectPosition, requestCamera])
+
+  const focusRack = useCallback((rackId: string) => {
+    selectRack(rackId)
+    const rack = layout.data?.racks.find(r => r.id === rackId)
+    if (rack && layout.data) requestCamera(frameRack(layout.data, rack))
+  }, [layout.data, selectRack, requestCamera])
+
+  const focusLevel = useCallback((level: number | null) => {
+    selectLevel(level)
+    if (level != null && selectedRack && layout.data) requestCamera(frameLevel(layout.data, selectedRack, level))
+  }, [layout.data, selectedRack, selectLevel, requestCamera])
+
+  // SKU search highlights every location holding the SKU and frames them all
+  const onHighlight = useCallback((sku: string | null) => {
+    setHighlightSku(sku)
+    if (!sku || !layout.data || !plan) return
+    const points: Vec3[] = []
+    for (const l of lots) {
+      if (l.sku !== sku || !l.positionId) continue
+      const t = layoutToWorld(layout.data, l.positionId)
+      if (t) points.push(t.position)
+    }
+    const pose = framePoints(points, plan)
+    if (pose) requestCamera(pose, pose.cutaway)
+  }, [layout.data, plan, lots, setHighlightSku, requestCamera])
+
+  const focusDock = useCallback((dockId: string) => {
+    const dock = layout.data?.docks.find(d => d.id === dockId)
+    const pose = dock && layout.data ? frameDock(layout.data, dock) : null
+    if (pose) requestCamera(pose)
+  }, [layout.data, requestCamera])
+
+  const focusShipment = useCallback((s: Shipment) => {
+    selectEntity({ kind: 'shipment', id: s.id })
+    if (s.dockId) focusDock(s.dockId)
+  }, [selectEntity, focusDock])
+
+  const focusEquipment = useCallback((e: Equipment) => {
+    selectEntity({ kind: 'equipment', id: e.id })
+    if (plan) requestCamera(frameFloorPoint(e.home.x, e.home.z, plan))
+  }, [selectEntity, plan, requestCamera])
+
+  /** Events with a 3D target return a handler; others are not selectable */
+  const eventTarget = useCallback((entry: LoggedEvent) => {
+    const e = entry.event
+    switch (e.type) {
+      case 'inventory.updated': return e.lot.positionId ? () => focusPosition(e.lot.positionId as string) : undefined
+      case 'shipment.status': return () => focusShipment(e.shipment)
+      case 'equipment.task': return () => focusEquipment(e.equipment)
+      case 'dock.status': return () => {
+        selectEntity({ kind: 'dock', id: e.dockId })
+        focusDock(e.dockId)
+      }
+      default: return undefined
+    }
+  }, [focusPosition, focusShipment, focusEquipment, focusDock, selectEntity])
+
+  const isEventSelected = useCallback((entry: LoggedEvent) => {
+    const e = entry.event
+    if (e.type === 'inventory.updated') return !!selection.positionId && e.lot.positionId === selection.positionId
+    if (!selectedEntity) return false
+    if (e.type === 'shipment.status') return (selectedEntity.kind === 'shipment' && e.shipment.id === selectedEntity.id) || (selectedEntity.kind === 'dock' && e.shipment.dockId === selectedEntity.id)
+    if (e.type === 'equipment.task') return selectedEntity.kind === 'equipment' && e.equipment.id === selectedEntity.id
+    if (e.type === 'dock.status') return selectedEntity.kind === 'dock' && e.dockId === selectedEntity.id
+    return false
+  }, [selection.positionId, selectedEntity])
+
+  const selectedShipmentIds = useMemo(() => {
+    if (!selectedEntity) return new Set<string>()
+    if (selectedEntity.kind === 'shipment') return new Set([selectedEntity.id])
+    if (selectedEntity.kind === 'dock') return new Set((shipments.data ?? []).filter(x => x.dockId === selectedEntity.id).map(x => x.id))
+    return new Set<string>()
+  }, [selectedEntity, shipments.data])
+
+  // Selecting an object in 3D brings its rows into view in the live table
+  useEffect(() => useTwinStore.subscribe((s, prev) => {
+    if (s.selectedEntity && s.selectedEntity !== prev.selectedEntity) {
+      setTab(s.selectedEntity.kind === 'equipment' ? 'equipment' : 'shipments')
+    } else if (s.selection.positionId && s.selection.positionId !== prev.selection.positionId) {
+      setTab('events')
+    }
+  }), [])
   const planForApproval = recovery.data?.plan ?? null
 
   const onContextLost = useCallback(() => setContextLost(true), [])
@@ -187,6 +282,8 @@ export function WarehousePage() {
               key={canvasKey}
               layout={layout.data}
               shipments={shipments.data ?? []}
+              lots={lots}
+              equipment={equipment.data ?? []}
               stale={stale}
               onContextLost={onContextLost}
               onContextRestored={onContextRestored}
@@ -297,7 +394,7 @@ export function WarehousePage() {
           )}
 
           <div className={clsx('rounded-xl p-2', glass)}>
-            <SkuSearch highlightSku={highlightSku} onHighlight={onHighlight} onSelectPosition={selectPosition} />
+            <SkuSearch highlightSku={highlightSku} onHighlight={onHighlight} onSelectPosition={focusPosition} />
           </div>
 
           {mode === 'simulation' && sim.state && (
@@ -307,7 +404,15 @@ export function WarehousePage() {
           )}
 
           <Panel title="Inspector">
-            {selection.positionId ? (
+            {selectedEntity ? (
+              <EntityInspector
+                entity={selectedEntity}
+                docks={layout.data?.docks ?? []}
+                shipments={shipments.data ?? []}
+                equipment={equipment.data ?? []}
+                mode={mode}
+              />
+            ) : selection.positionId ? (
               <PositionInspector positionId={selection.positionId} lots={byPosition.get(selection.positionId)} mode={mode} />
             ) : selectedRack ? (
               <RackSummaryInspector rack={selectedRack} lotsByPosition={byPosition} />
@@ -322,8 +427,8 @@ export function WarehousePage() {
                   selectedLevel={selection.level}
                   selectedPositionId={selection.positionId}
                   highlightSku={highlightSku}
-                  onSelectLevel={selectLevel}
-                  onSelectPosition={selectPosition}
+                  onSelectLevel={focusLevel}
+                  onSelectPosition={focusPosition}
                   onClose={clearSelection}
                 />
               </div>
@@ -376,10 +481,20 @@ export function WarehousePage() {
               equipment={equipment.data ?? []}
               selectedRackId={selection.rackId}
               highlightedRackIds={highlightedRackIds}
-              onSelectRack={selectRack}
+              onSelectRack={focusRack}
             />
           </div>
         )}
+
+        <ul className={clsx('pointer-events-auto flex w-full max-w-[640px] flex-wrap gap-x-3 gap-y-1 rounded-xl px-3 py-2', glass)} aria-label="Status legend">
+          {LEGEND_ORDER.map(st => (
+            <li key={st} className="flex items-center gap-1 text-[11px] font-medium text-[#334155]" title={STATUS_STYLES[st].description}>
+              <StatusSwatch status={st} size={12} />
+              <StatusIcon status={st} className="h-3 w-3" />
+              {STATUS_STYLES[st].label}
+            </li>
+          ))}
+        </ul>
 
         <section className={clsx('pointer-events-auto w-full max-w-[640px] overflow-hidden rounded-xl', glass)} aria-label="Live table">
           <div role="tablist" className="flex items-center gap-1 border-b border-[#E2E8F0]/80 p-1">
@@ -404,9 +519,9 @@ export function WarehousePage() {
           </div>
           {tab && (
             <div role="tabpanel" className="max-h-56 overflow-y-auto bg-white/60">
-              {tab === 'events' && <EventFeed events={events} mode={mode} />}
-              {tab === 'shipments' && <div className="p-3"><ShipmentsList query={shipments} mode={mode} /></div>}
-              {tab === 'equipment' && <div className="p-3"><EquipmentList query={equipment} /></div>}
+              {tab === 'events' && <EventFeed events={events} mode={mode} isSelected={isEventSelected} onSelect={eventTarget} />}
+              {tab === 'shipments' && <div className="p-3"><ShipmentsList query={shipments} mode={mode} selectedIds={selectedShipmentIds} onSelect={focusShipment} /></div>}
+              {tab === 'equipment' && <div className="p-3"><EquipmentList query={equipment} selectedId={selectedEntity?.kind === 'equipment' ? selectedEntity.id : null} onSelect={focusEquipment} /></div>}
             </div>
           )}
         </section>

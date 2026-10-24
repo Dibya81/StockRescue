@@ -27,6 +27,29 @@ interface QueryLike<T> {
   refetch: () => unknown
 }
 
+/** Props that make a list row act as a button that selects its 3D object. */
+function selectable(selected: boolean, onSelect: (() => void) | undefined) {
+  if (!onSelect) return {}
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    'aria-pressed': selected,
+    onClick: onSelect,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onSelect()
+      }
+    },
+  }
+}
+
+const rowState = (selected: boolean, interactive: boolean) =>
+  clsx(
+    interactive && 'cursor-pointer transition-colors hover:bg-[#F8FAFF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1F4FD8]',
+    selected && 'bg-[#EFF6FF] ring-1 ring-inset ring-[#1F4FD8]/40',
+  )
+
 function QueryBody<T>({ query, empty, children }: {
   query: QueryLike<T>
   empty: { title: string; detail?: string }
@@ -52,7 +75,13 @@ const EVENT_ICON: Record<TwinEventType, LucideIcon> = {
   'dock.status': Warehouse,
 }
 
-export function EventFeed({ events, mode }: { events: LoggedEvent[]; mode: DataMode }) {
+export function EventFeed({ events, mode, isSelected, onSelect }: {
+  events: LoggedEvent[]
+  mode: DataMode
+  isSelected?: (e: LoggedEvent) => boolean
+  /** Only events with a 3D target are selectable */
+  onSelect?: (e: LoggedEvent) => (() => void) | undefined
+}) {
   if (events.length === 0) {
     return (
       <PanelEmpty
@@ -63,10 +92,15 @@ export function EventFeed({ events, mode }: { events: LoggedEvent[]; mode: DataM
   }
   return (
     <ol className="flex flex-col" aria-live="polite" aria-label="Event feed">
-      {events.slice(0, 60).map(({ seq, event, mode: m }) => {
+      {events.slice(0, 60).map(entry => {
+        const { seq, event, mode: m } = entry
         const Icon = EVENT_ICON[event.type]
         return (
-          <li key={seq} className="animate-nav-item flex items-start gap-3 border-b border-[#F1F5F9] px-4 py-2 last:border-0">
+          <li
+            key={seq}
+            className={clsx('animate-nav-item flex items-start gap-3 border-b border-[#F1F5F9] px-4 py-2 last:border-0', rowState(!!isSelected?.(entry), !!onSelect?.(entry)))}
+            {...selectable(!!isSelected?.(entry), onSelect?.(entry))}
+          >
             <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-[#EFF6FF] text-[#1F4FD8]">
               <Icon className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
@@ -96,13 +130,22 @@ const SHIPMENT_TONE: Record<Shipment['status'], string> = {
   departed: 'bg-[#DCFCE7] text-[#166534]',
 }
 
-export function ShipmentsList({ query, mode }: { query: QueryLike<Shipment[]>; mode: DataMode }) {
+export function ShipmentsList({ query, mode, selectedIds, onSelect }: {
+  query: QueryLike<Shipment[]>
+  mode: DataMode
+  selectedIds?: ReadonlySet<string>
+  onSelect?: (s: Shipment) => void
+}) {
   return (
     <QueryBody query={query} empty={{ title: 'No shipments on record' }}>
       {shipments => (
         <ul className="flex flex-col gap-2.5">
           {[...shipments].reverse().map(s => (
-            <li key={s.id} className="animate-fade-in rounded-lg border border-[#E2E8F0] p-3">
+            <li
+              key={s.id}
+              className={clsx('animate-fade-in rounded-lg border border-[#E2E8F0] p-3', rowState(!!selectedIds?.has(s.id), !!onSelect))}
+              {...selectable(!!selectedIds?.has(s.id), onSelect && (() => onSelect(s)))}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex items-center gap-2">
                   <Truck className="h-4 w-4 text-[#64748B]" aria-hidden="true" />
@@ -150,13 +193,21 @@ const EQUIPMENT_TONE: Record<Equipment['status'], string> = {
   maintenance: 'text-[#92400E] bg-[#FEF3C7]',
 }
 
-export function EquipmentList({ query }: { query: QueryLike<Equipment[]> }) {
+export function EquipmentList({ query, selectedId, onSelect }: {
+  query: QueryLike<Equipment[]>
+  selectedId?: string | null
+  onSelect?: (e: Equipment) => void
+}) {
   return (
     <QueryBody query={query} empty={{ title: 'No equipment registered' }}>
       {list => (
         <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {list.map(eq => (
-            <li key={eq.id} className="flex items-start gap-2 rounded-lg border border-[#F1F5F9] px-2.5 py-2">
+            <li
+              key={eq.id}
+              className={clsx('flex items-start gap-2 rounded-lg border border-[#F1F5F9] px-2.5 py-2', rowState(selectedId === eq.id, !!onSelect))}
+              {...selectable(selectedId === eq.id, onSelect && (() => onSelect(eq)))}
+            >
               <span className="relative mt-0.5 flex h-2 w-2 flex-shrink-0" aria-hidden="true">
                 {eq.status === 'active' && <span className="animate-status-ping absolute inset-0 rounded-full bg-[#1F4FD8]" />}
                 <span className={clsx('relative h-2 w-2 rounded-full', eq.status === 'active' ? 'bg-[#1F4FD8]' : eq.status === 'charging' ? 'bg-[#16A34A]' : eq.status === 'maintenance' ? 'bg-[#D97706]' : 'bg-[#94A3B8]')} />
