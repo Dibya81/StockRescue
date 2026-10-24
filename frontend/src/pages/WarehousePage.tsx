@@ -1,224 +1,279 @@
-import { lazy, Suspense, useState, useMemo } from 'react'
-import { Search, Box, List, ShieldAlert, AlertTriangle, CheckCircle2, Layers, RefreshCw } from 'lucide-react'
-import { useCases } from '@/hooks/api'
-import { SkeletonCard } from '@/components/ui/Skeleton'
-import { WarehouseListFallback } from '@/features/warehouse/WarehouseListFallback'
-import type { InventoryRecord, StockStatus } from '@/types/api'
-
-// Lazy-load the heavy 3D scene
-const WarehouseScene = lazy(() =>
-  import('@/features/warehouse/WarehouseScene').then(m => ({ default: m.WarehouseScene })),
-)
-
-function detectWebGL(): boolean {
-  try {
-    const canvas = document.createElement('canvas')
-    return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'))
-  } catch {
-    return false
-  }
-}
+import { useCallback, useMemo } from 'react'
+import { FlaskConical, X } from 'lucide-react'
+import {
+  indexLotsByPosition,
+  indexLotsByRack,
+  parsePositionId,
+  totalPositions,
+} from '@/features/warehouse-twin/data/layoutGeometry'
+import { countByStatus, rollupStatus } from '@/features/warehouse-twin/data/statusMapping'
+import {
+  useActor,
+  useDisruptions,
+  useEquipment,
+  useInventory,
+  useLayout,
+  useRecovery,
+  useShipments,
+  useSimulation,
+  useTwinEventStream,
+} from '@/features/warehouse-twin/hooks/useTwinData'
+import { useTwinStore } from '@/features/warehouse-twin/store/twinStore'
+import { FloorPlan, type RackSummary } from '@/features/warehouse-twin/ui/FloorPlan'
+import { RackElevation } from '@/features/warehouse-twin/ui/RackElevation'
+import { InspectorHint, PositionInspector, RackSummaryInspector, SkuSearch } from '@/features/warehouse-twin/ui/Inspector'
+import {
+  DisruptionSummary,
+  EquipmentList,
+  EventFeed,
+  NoDisruption,
+  ShipmentsList,
+} from '@/features/warehouse-twin/ui/OperationsPanels'
+import { ApprovalCard, SimControls } from '@/features/warehouse-twin/ui/SimControls'
+import {
+  ConnectionPill,
+  KpiStrip,
+  ModeSwitch,
+  Panel,
+  PanelError,
+  PanelLoading,
+  RoleChip,
+  SimBanner,
+  StatusLegend,
+  type KpiItem,
+} from '@/features/warehouse-twin/ui/TwinChrome'
 
 export function WarehousePage() {
-  const { data, isLoading, isError, refetch } = useCases({ limit: 100 })
-  const [webGLAvailable] = useState(() => detectWebGL())
-  const [use3D, setUse3D] = useState(webGLAvailable)
-  const [searchSku, setSearchSku] = useState('')
-  const [filterStatus, setFilterStatus] = useState<StockStatus | 'all'>('all')
+  useTwinEventStream()
 
-  const inventory: InventoryRecord[] = useMemo(
-    () => (data?.items ?? []).flatMap(c => c.inventory),
-    [data],
-  )
+  const mode = useTwinStore(s => s.mode)
+  const setMode = useTwinStore(s => s.setMode)
+  const connection = useTwinStore(s => s.connection)
+  const selection = useTwinStore(s => s.selection)
+  const selectRack = useTwinStore(s => s.selectRack)
+  const selectLevel = useTwinStore(s => s.selectLevel)
+  const selectPosition = useTwinStore(s => s.selectPosition)
+  const clearSelection = useTwinStore(s => s.clearSelection)
+  const highlightSku = useTwinStore(s => s.highlightSku)
+  const setHighlightSku = useTwinStore(s => s.setHighlightSku)
+  const events = useTwinStore(s => s.events)
 
-  const stats = useMemo(() => {
-    let shortageCount = 0
-    let lowCount = 0
-    let normalCount = 0
+  const actor = useActor()
+  const sim = useSimulation()
+  const layout = useLayout()
+  const inventory = useInventory()
+  const shipments = useShipments()
+  const equipment = useEquipment()
+  const disruptions = useDisruptions()
 
-    const list = inventory.length > 0 ? inventory : [
-      { sku: 'SKU-DEMO-01', shortage: 0, available_quantity: 45, min_stock_level: 20 },
-      { sku: 'SKU-DEMO-02', shortage: 21, available_quantity: 4, min_stock_level: 10 },
-      { sku: 'SKU-DEMO-03', shortage: 0, available_quantity: 8, min_stock_level: 15 },
-      { sku: 'SKU-DEMO-04', shortage: 0, available_quantity: 60, min_stock_level: 20 },
-    ] as InventoryRecord[]
+  const activeDisruption = useMemo(() => {
+    const list = disruptions.data ?? []
+    return list.length > 0 ? list[list.length - 1] : null
+  }, [disruptions.data])
+  const recovery = useRecovery(activeDisruption?.id ?? null)
 
-    for (const inv of list) {
-      if (inv.shortage > 0) shortageCount++
-      else if (inv.min_stock_level != null && inv.available_quantity <= inv.min_stock_level) lowCount++
-      else if (inv.available_quantity > 0) normalCount++
+  const lots = useMemo(() => inventory.data ?? [], [inventory.data])
+  const { byPosition } = useMemo(() => indexLotsByPosition(lots), [lots])
+
+  const rackSummaries = useMemo(() => {
+    const map = new Map<string, RackSummary>()
+    if (!layout.data) return map
+    const byRack = indexLotsByRack(lots)
+    for (const rack of layout.data.racks) {
+      const rackLots = byRack.get(rack.id) ?? []
+      map.set(rack.id, {
+        status: rollupStatus(rackLots.map(l => l.status)),
+        occupied: new Set(rackLots.map(l => l.positionId)).size,
+        total: rack.levels * rack.positionsPerLevel,
+      })
     }
+    return map
+  }, [layout.data, lots])
 
-    return {
-      total: list.length,
-      shortage: shortageCount,
-      low: lowCount,
-      normal: normalCount,
+  const highlightedRackIds = useMemo(() => {
+    if (!highlightSku) return null
+    const ids = new Set<string>()
+    for (const l of lots) {
+      if (l.sku !== highlightSku || !l.positionId) continue
+      const parsed = parsePositionId(l.positionId)
+      if (parsed) ids.add(parsed.rackId)
     }
-  }, [inventory])
+    return ids
+  }, [highlightSku, lots])
 
-  if (isLoading) return <SkeletonCard className="h-96" />
+  const kpis = useMemo<KpiItem[] | null>(() => {
+    if (!layout.data || !inventory.data) return null
+    const counts = countByStatus(lots)
+    const positions = totalPositions(layout.data)
+    return [
+      { label: 'Positions', value: positions.toLocaleString(), hint: 'Rack positions defined in the layout' },
+      { label: 'Occupied', value: `${Math.round((byPosition.size / Math.max(1, positions)) * 100)}%`, status: 'in_stock', hint: `${byPosition.size} positions hold at least one lot` },
+      { label: 'Low stock', value: counts.low_stock, status: 'low_stock', hint: 'Lots at or below reorder point' },
+      { label: 'Shortage', value: counts.shortage + counts.disruption_affected, status: 'shortage', hint: 'Shortage + disruption-affected lots' },
+      { label: 'Incoming', value: counts.incoming, status: 'incoming', hint: 'Positions reserved for inbound stock' },
+      { label: 'Quarantine', value: counts.quarantine, status: 'quarantine', hint: 'Lots held for inspection' },
+    ]
+  }, [layout.data, inventory.data, lots, byPosition])
+
+  const legendCounts = useMemo(() => {
+    if (!layout.data) return undefined
+    const counts = countByStatus(lots)
+    counts.empty = Math.max(0, totalPositions(layout.data) - byPosition.size)
+    return counts
+  }, [layout.data, lots, byPosition])
+
+  const selectedRack = layout.data?.racks.find(r => r.id === selection.rackId) ?? null
+  const onHighlight = useCallback((sku: string | null) => setHighlightSku(sku), [setHighlightSku])
+  const planForApproval = recovery.data?.plan ?? null
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Top Header & Telemetry Strip */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-[#0F172A]">
-              3D Warehouse Digital Twin
-            </h1>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#16A34A]/30 bg-[#DCFCE7] px-2.5 py-0.5 text-xs font-semibold text-[#16A34A]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#16A34A] animate-pulse" />
-              Live Telemetry
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-[#475569]">
-            Interactive spatial inventory mapping across aisles, industrial storage racks, and individual bins.
+    <div className="flex flex-col gap-4">
+      {/* Header */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold tracking-tight text-[#0F172A]">Warehouse Digital Twin</h1>
+          <p className="mt-0.5 text-xs text-[#475569]">
+            {layout.data
+              ? `${layout.data.name} · layout v${layout.data.version} · ${layout.data.racks.length} racks`
+              : 'Spatial inventory, docks, equipment and recovery flow'}
           </p>
         </div>
-
-        {/* Quick Inventory Health Pills */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs shadow-2xs">
-            <Layers className="h-3.5 w-3.5 text-[#64748B]" />
-            <span className="text-[#64748B]">Total Bins:</span>
-            <span className="font-semibold text-[#0F172A] tabular-nums">{stats.total}</span>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-[#DC2626]/20 bg-[#FEE2E2] px-3 py-1.5 text-xs shadow-2xs">
-            <ShieldAlert className="h-3.5 w-3.5 text-[#DC2626]" />
-            <span className="text-[#DC2626] font-medium">Shortages:</span>
-            <span className="font-semibold text-[#DC2626] tabular-nums">{stats.shortage}</span>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-[#F59E0B]/20 bg-[#FEF3C7] px-3 py-1.5 text-xs shadow-2xs">
-            <AlertTriangle className="h-3.5 w-3.5 text-[#D97706]" />
-            <span className="text-[#D97706] font-medium">Low Stock:</span>
-            <span className="font-semibold text-[#D97706] tabular-nums">{stats.low}</span>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-[#16A34A]/20 bg-[#DCFCE7] px-3 py-1.5 text-xs shadow-2xs">
-            <CheckCircle2 className="h-3.5 w-3.5 text-[#16A34A]" />
-            <span className="text-[#16A34A] font-medium">Nominal:</span>
-            <span className="font-semibold text-[#16A34A] tabular-nums">{stats.normal}</span>
-          </div>
+          <ModeSwitch mode={mode} onChange={setMode} />
+          <ConnectionPill state={connection} mode={mode} />
+          <RoleChip role={actor.role} />
         </div>
       </div>
 
-      {/* Connection Notice if Backend is Offline */}
-      {isError && (
-        <div className="flex items-center justify-between rounded-xl border border-[#FDE68A] bg-[#FEF3C7] px-4 py-3 text-xs text-[#D97706] shadow-2xs">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-[#D97706] flex-shrink-0" />
-            <span>
-              <strong>Backend Disconnected:</strong> Visualizing spatial warehouse twin using default geometry layout. Live inventory sync will resume automatically upon reconnect.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="btn-clay text-xs py-1 px-3 ml-3 flex items-center gap-1.5 whitespace-nowrap"
+      {mode === 'simulation' && <SimBanner scenarioTitle={sim.state?.scenarioTitle ?? null} />}
+
+      {kpis && <KpiStrip items={kpis} />}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        {/* Main column */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <Panel
+            title="Floor plan"
+            actions={<SkuSearch highlightSku={highlightSku} onHighlight={onHighlight} onSelectPosition={selectPosition} />}
+            bodyClassName="p-3 sm:p-4"
           >
-            <RefreshCw className="h-3 w-3 text-[#2563EB]" />
-            Retry
-          </button>
-        </div>
-      )}
+            {highlightSku && (
+              <div className="animate-fade-in mb-3 flex items-center justify-between rounded-lg bg-[#EFF6FF] px-3 py-1.5 text-xs text-[#1E3A8A]">
+                <span>
+                  Showing locations holding <span className="font-mono font-semibold">{highlightSku}</span> ({highlightedRackIds?.size ?? 0} racks)
+                </span>
+                <button type="button" onClick={() => setHighlightSku(null)} className="rounded p-0.5 hover:bg-white" aria-label="Clear SKU highlight">
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            )}
 
-      {/* Control Bar */}
-      <div className="card p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-sm bg-[#FFFFFF]">
-        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-          {/* Search SKU */}
-          <div className="relative flex-1 min-w-[200px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" aria-hidden="true" />
-            <input
-              type="search"
-              placeholder="Search SKU or location coordinates…"
-              value={searchSku}
-              onChange={e => setSearchSku(e.target.value)}
-              className="input-field pl-9 pr-3 py-1.5 text-xs"
-              aria-label="Search inventory SKU in warehouse"
-            />
+            {layout.isLoading || inventory.isLoading ? (
+              <PanelLoading label="Loading warehouse layout…" className="py-24" />
+            ) : layout.isError || inventory.isError ? (
+              <PanelError
+                error={layout.error ?? inventory.error}
+                onRetry={() => {
+                  void layout.refetch()
+                  void inventory.refetch()
+                }}
+                className="py-20"
+                action={
+                  mode === 'live' && (
+                    <button type="button" onClick={() => setMode('simulation')} className="btn-primary px-3 py-1.5 text-xs">
+                      <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" /> Switch to Simulation
+                    </button>
+                  )
+                }
+              />
+            ) : layout.data ? (
+              <FloorPlan
+                layout={layout.data}
+                rackSummaries={rackSummaries}
+                shipments={shipments.data ?? []}
+                equipment={equipment.data ?? []}
+                selectedRackId={selection.rackId}
+                highlightedRackIds={highlightedRackIds}
+                onSelectRack={selectRack}
+              />
+            ) : null}
+
+            {selectedRack && (
+              <div className="mt-4 border-t border-[#F1F5F9] pt-4">
+                <RackElevation
+                  rack={selectedRack}
+                  lotsByPosition={byPosition}
+                  selectedLevel={selection.level}
+                  selectedPositionId={selection.positionId}
+                  highlightSku={highlightSku}
+                  onSelectLevel={selectLevel}
+                  onSelectPosition={selectPosition}
+                  onClose={clearSelection}
+                />
+              </div>
+            )}
+          </Panel>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Panel title="Docks & shipments">
+              <ShipmentsList query={shipments} mode={mode} />
+            </Panel>
+            <Panel title="Equipment">
+              <EquipmentList query={equipment} />
+            </Panel>
           </div>
-
-          {/* Status filter dropdown */}
-          <select
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value as StockStatus | 'all')}
-            className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs text-[#0F172A] focus-visible:border-[#2563EB] focus-visible:outline-none focus:ring-2 focus:ring-[#2563EB]/20 shadow-2xs font-medium"
-            aria-label="Filter bins by stock status"
-          >
-            <option value="all">All Statuses ({stats.total})</option>
-            <option value="shortage">Shortage ({stats.shortage})</option>
-            <option value="low">Low Stock ({stats.low})</option>
-            <option value="normal">Normal ({stats.normal})</option>
-            <option value="unknown">Unknown</option>
-          </select>
         </div>
 
-        {/* View mode toggle */}
-        <div className="flex items-center gap-2">
-          {!webGLAvailable && (
-            <span className="text-xs text-[#D97706] flex items-center gap-1 mr-2">
-              <AlertTriangle className="h-3.5 w-3.5" /> WebGL unavailable, 2D fallback active
-            </span>
+        {/* Right rail */}
+        <aside className="flex min-w-0 flex-col gap-4" aria-label="Inspector and controls">
+          {mode === 'simulation' && sim.state && (
+            <Panel title="Scenario player">
+              <SimControls state={sim.state} onStart={sim.start} onPause={sim.pause} onStep={sim.step} onReset={sim.reset} />
+            </Panel>
           )}
 
-          <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-[#F1F5F9] p-1 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => setUse3D(true)}
-              disabled={!webGLAvailable}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                use3D
-                  ? 'bg-[#FFFFFF] text-[#2563EB] shadow-xs'
-                  : 'text-[#64748B] hover:text-[#0F172A]'
-              } ${!webGLAvailable ? 'opacity-40 cursor-not-allowed' : ''}`}
-              aria-pressed={use3D}
-            >
-              <Box className="h-3.5 w-3.5" />
-              3D Twin
-            </button>
-            <button
-              type="button"
-              onClick={() => setUse3D(false)}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                !use3D
-                  ? 'bg-[#FFFFFF] text-[#2563EB] shadow-xs'
-                  : 'text-[#64748B] hover:text-[#0F172A]'
-              }`}
-              aria-pressed={!use3D}
-            >
-              <List className="h-3.5 w-3.5" />
-              Matrix List
-            </button>
-          </div>
-        </div>
+          <Panel title="Inspector">
+            {selection.positionId ? (
+              <PositionInspector positionId={selection.positionId} lots={byPosition.get(selection.positionId)} mode={mode} />
+            ) : selectedRack ? (
+              <RackSummaryInspector rack={selectedRack} lotsByPosition={byPosition} />
+            ) : (
+              <InspectorHint />
+            )}
+          </Panel>
+
+          <Panel title="Disruption">
+            {disruptions.isLoading ? (
+              <PanelLoading />
+            ) : disruptions.isError ? (
+              <PanelError error={disruptions.error} onRetry={() => void disruptions.refetch()} />
+            ) : activeDisruption ? (
+              <DisruptionSummary disruption={activeDisruption} mode={mode} />
+            ) : (
+              <NoDisruption mode={mode} />
+            )}
+          </Panel>
+
+          {activeDisruption && planForApproval && (
+            <Panel title="Recovery recommendation">
+              <ApprovalCard
+                key={planForApproval.id}
+                disruption={activeDisruption}
+                plan={planForApproval}
+                simulated={mode === 'simulation'}
+              />
+            </Panel>
+          )}
+
+          <Panel title="Legend">
+            <StatusLegend counts={legendCounts} />
+          </Panel>
+        </aside>
       </div>
 
-      {/* Main Visualizer Scene / List */}
-      {use3D ? (
-        <div className="relative h-[640px] rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] overflow-hidden shadow-md">
-          <Suspense
-            fallback={
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-[#64748B]">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#2563EB] border-t-transparent" />
-                <span>Initializing 3D Spatial Geometry & Materials…</span>
-              </div>
-            }
-          >
-            <WarehouseScene
-              inventory={inventory}
-              searchSku={searchSku}
-              filterStatus={filterStatus}
-            />
-          </Suspense>
-        </div>
-      ) : (
-        <WarehouseListFallback
-          inventory={inventory}
-          searchSku={searchSku}
-          filterStatus={filterStatus}
-        />
-      )}
+      <Panel title="Event feed" bodyClassName="max-h-80 overflow-y-auto">
+        <EventFeed events={events} mode={mode} />
+      </Panel>
     </div>
   )
 }

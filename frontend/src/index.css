@@ -227,29 +227,11 @@
 }
 
 /* ─────────────────────────────────────────────────────────
-   Component Utility Classes
+   Component Classes
+   Lives in the components layer so Tailwind utilities (pl-9, py-1.5…)
+   can override padding/size on individual usages.
 ───────────────────────────────────────────────────────── */
-@layer utilities {
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
-  }
-
-  .font-mono {
-    font-family: var(--font-mono);
-  }
-
-  .tabular-nums {
-    font-variant-numeric: tabular-nums;
-  }
-
+@layer components {
   /* ── Glassmorphism Surfaces ── */
   .glass-panel {
     background: var(--glass-bg);
@@ -509,6 +491,32 @@
     cursor: not-allowed;
   }
 
+}
+
+/* ─────────────────────────────────────────────────────────
+   Utility Classes
+───────────────────────────────────────────────────────── */
+@layer utilities {
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ── Truncation ── */
   .truncate-text {
     overflow: hidden;
@@ -516,19 +524,45 @@
     white-space: nowrap;
   }
 
-  /* ── Page Transition Animations ── */
+  /* ── Motion: page, shell & overlay transitions ── */
   @keyframes pageFadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes navItemIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes crumbIn {
+    from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+    to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+  @keyframes routeProgress {
+    0%   { transform: scaleX(0); opacity: 1; }
+    70%  { transform: scaleX(0.85); opacity: 1; }
+    100% { transform: scaleX(1); opacity: 0; }
+  }
+  @keyframes statusPing {
+    0%   { transform: scale(1); opacity: 0.55; }
+    80%, 100% { transform: scale(2.4); opacity: 0; }
   }
 
-  .animate-page-enter {
-    animation: pageFadeIn 250ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  .animate-page-enter { animation: pageFadeIn 320ms var(--ease-out) both; }
+  .animate-nav-item   { animation: navItemIn 360ms var(--ease-out) both; }
+  .animate-pop-in     { animation: popIn 160ms var(--ease-out) both; transform-origin: top right; }
+  .animate-fade-in    { animation: fadeIn 200ms var(--ease-out) both; }
+  .animate-crumb      { animation: crumbIn 260ms var(--ease-out) both; }
+  .animate-route-progress {
+    animation: routeProgress 560ms var(--ease-out) both;
+    transform-origin: left center;
   }
+  .animate-status-ping { animation: statusPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
 }
