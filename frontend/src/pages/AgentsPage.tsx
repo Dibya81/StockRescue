@@ -41,17 +41,17 @@ export function AgentsPage() {
         <h2 id="live-sim-heading" className="sr-only">Live Agent Simulation</h2>
         <Link
           to="/simulation"
-          className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-[#0a1322] p-6 text-slate-200 shadow-sm transition-colors hover:border-cyan-500/50"
+          className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 text-slate-700 shadow-sm transition-colors hover:border-blue-400"
         >
           <div className="flex items-center gap-4">
-            <span className="grid h-12 w-12 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Workflow className="h-6 w-6" /></span>
+            <span className="grid h-12 w-12 place-items-center rounded-xl bg-blue-50 text-blue-600"><Workflow className="h-6 w-6" /></span>
             <div>
-              <div className="text-[10px] font-bold tracking-wider text-amber-300">DEMO MODE · SIMULATED</div>
-              <div className="text-lg font-semibold text-slate-50">Open the live multi-agent simulation</div>
-              <div className="text-sm text-slate-400">Case SR-2026-001 · BRG-6205 shortage of 380 units · 8 agents, 10 scenarios, human approval gate</div>
+              <div className="text-[10px] font-bold tracking-wider text-amber-600">DEMO MODE · SIMULATED</div>
+              <div className="text-lg font-semibold text-slate-900">Open the live multi-agent simulation</div>
+              <div className="text-sm text-slate-500">Case SR-2026-001 · BRG-6205 shortage of 380 units · 8 agents, 10 scenarios, human approval gate</div>
             </div>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white group-hover:bg-cyan-500">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white group-hover:bg-blue-700">
             Start simulation <ArrowRight className="h-4 w-4" />
           </span>
         </Link>
