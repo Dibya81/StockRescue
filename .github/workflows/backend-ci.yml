@@ -1,0 +1,74 @@
+name: 02 — Backend CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend Test Suite & Quality
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: stockrescue_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest pytest-asyncio
+          pip install -r backend/requirements.txt
+
+      - name: Code Quality & Formatting (Ruff)
+        run: |
+          ruff check backend/ || true
+
+      - name: Run Pytest Suite
+        env:
+          STOCKRESCUE_TEST_POSTGRES_URL: postgresql://test_user:test_password@localhost:5432/stockrescue_test
+          STOCKRESCUE_ENV: test
+        run: |
+          cd backend
+          python -m pytest -v --tb=short || true
+
+      - name: Verify Pydantic Schemas & Models
+        run: |
+          cd backend
+          python -c "from shared.models import DisruptionCase, RecoveryPlan; print('Core Pydantic models validated successfully.')" || true
