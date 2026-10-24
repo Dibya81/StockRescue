@@ -16,4 +16,4 @@ langchain-openai
 langgraph-checkpoint-postgres
 psycopg[binary,pool]
 cryptography>=42.0.0
-pyjwt[crypto]>=2.8.0
+pyjwt[crypto]>=2.15.1
