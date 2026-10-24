@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     supabase_jwt_algorithms: str = "ES256,HS256"
     supabase_jwks_cache_seconds: int = Field(default=300, ge=10, le=86400)
     supabase_jwks_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30.0)
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5190,http://127.0.0.1:5190"
     max_request_body_bytes: int = Field(default=1_048_576, ge=65_536, le=10_485_760)
     specialist_transport_mode: str = Field(default="local")
     specialist_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)

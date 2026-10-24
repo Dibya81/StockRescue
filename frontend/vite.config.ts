@@ -34,12 +34,29 @@ export default defineConfig({
           }
         },
       },
+      '/suppliers': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/inventory': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/deliveries': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/communications': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    exclude: ['e2e/**', 'node_modules/**'],
     css: false,
   },
 })

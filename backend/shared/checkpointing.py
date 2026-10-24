@@ -10,11 +10,21 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+try:
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+except ImportError:
+    PostgresSaver = None  # type: ignore[assignment, misc]
+    JsonPlusSerializer = None  # type: ignore[assignment, misc]
+
 from pydantic import BaseModel, ValidationError
-from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+
+try:
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+except ImportError:
+    dict_row = None  # type: ignore[assignment, misc]
+    ConnectionPool = None  # type: ignore[assignment, misc]
 
 import shared.agent_contracts as agent_contracts
 import shared.models as shared_models
