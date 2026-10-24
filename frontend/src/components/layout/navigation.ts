@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Activity,
   Bot,
+  Workflow,
   Settings,
   type LucideIcon,
 } from 'lucide-react'
@@ -49,6 +50,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/suppliers',      icon: Truck,         label: 'Suppliers',      title: 'Suppliers & Sourcing' },
       { to: '/communications', icon: MessageSquare, label: 'Communications', title: 'Vendor Communications' },
+      { to: '/simulation',     icon: Workflow,      label: 'Live Simulation', title: 'Live Multi-Agent Simulation' },
       { to: '/agents',         icon: Bot,           label: 'Agents',         title: 'Agent Operations' },
     ],
   },

@@ -18,6 +18,7 @@ const ApprovalsPage      = lazy(() => import('@/pages/ApprovalsPage').then(m => 
 const CommunicationsPage = lazy(() => import('@/pages/CommunicationsPage').then(m => ({ default: m.CommunicationsPage })))
 const DeliveriesPage     = lazy(() => import('@/pages/DeliveriesPage').then(m => ({ default: m.DeliveriesPage })))
 const AgentsPage         = lazy(() => import('@/pages/AgentsPage').then(m => ({ default: m.AgentsPage })))
+const LiveSimulationPage = lazy(() => import('@/pages/LiveSimulationPage').then(m => ({ default: m.LiveSimulationPage })))
 const SettingsPage       = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 
 function Fallback() {
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
       { path: 'approvals',       element: <Protected requireApprover><ApprovalsPage /></Protected> },
       { path: 'communications',  element: <Protected><CommunicationsPage /></Protected> },
       { path: 'deliveries',      element: <Protected><DeliveriesPage /></Protected> },
+      { path: 'simulation',      element: <Protected><LiveSimulationPage /></Protected> },
       { path: 'agents',          element: <Protected><AgentsPage /></Protected> },
       { path: 'settings',        element: <Protected><SettingsPage /></Protected> },
       { path: '*',               element: <Navigate to="/" replace /> },

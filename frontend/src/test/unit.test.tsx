@@ -212,18 +212,18 @@ describe('CommunicationsPage', () => {
 // ─────────────────────────────────────────────────────────
 describe('AgentsPage', () => {
   it('renders 8 mailbox rows', () => {
-    render(<AgentsPage />)
+    render(<MemoryRouter><AgentsPage /></MemoryRouter>)
     const unknownBadges = screen.getAllByText('Unknown')
     expect(unknownBadges.length).toBeGreaterThanOrEqual(8)
   })
 
   it('does not expose seed or token text', () => {
-    const { container } = render(<AgentsPage />)
+    const { container } = render(<MemoryRouter><AgentsPage /></MemoryRouter>)
     expect(container.innerHTML).not.toMatch(/seed|private_key|secret/i)
   })
 
   it('shows shared mailbox note', () => {
-    render(<AgentsPage />)
+    render(<MemoryRouter><AgentsPage /></MemoryRouter>)
     expect(screen.getAllByText(/Shared mailbox/i).length).toBeGreaterThanOrEqual(2)
   })
 })

@@ -1,5 +1,5 @@
-import { Info } from 'lucide-react'
-import { LiveAgentSimulation } from '@/features/simulation/LiveAgentSimulation'
+import { Link } from 'react-router-dom'
+import { ArrowRight, Info, Workflow } from 'lucide-react'
 
 // Agent identity map — shared mailbox identities vs logical specialist capabilities.
 // Status is "Unknown" because there is no trusted API endpoint returning
@@ -39,7 +39,22 @@ export function AgentsPage() {
       {/* Hero Interactive Simulation Engine */}
       <section aria-labelledby="live-sim-heading">
         <h2 id="live-sim-heading" className="sr-only">Live Agent Simulation</h2>
-        <LiveAgentSimulation />
+        <Link
+          to="/simulation"
+          className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-[#0a1322] p-6 text-slate-200 shadow-sm transition-colors hover:border-cyan-500/50"
+        >
+          <div className="flex items-center gap-4">
+            <span className="grid h-12 w-12 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Workflow className="h-6 w-6" /></span>
+            <div>
+              <div className="text-[10px] font-bold tracking-wider text-amber-300">DEMO MODE · SIMULATED</div>
+              <div className="text-lg font-semibold text-slate-50">Open the live multi-agent simulation</div>
+              <div className="text-sm text-slate-400">Case SR-2026-001 · BRG-6205 shortage of 380 units · 8 agents, 10 scenarios, human approval gate</div>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white group-hover:bg-cyan-500">
+            Start simulation <ArrowRight className="h-4 w-4" />
+          </span>
+        </Link>
       </section>
 
       {/* Safety & Protocol Banner */}
