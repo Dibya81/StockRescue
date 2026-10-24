@@ -144,6 +144,12 @@ export function createApiClient(getToken: () => Promise<string | null>) {
         `/cases/${encodeURIComponent(caseId)}/plans/${encodeURIComponent(planId)}/approvals/audit?${qs}`,
       )
     },
+
+    // Extended operational records
+    listSuppliers: () => call<any[]>('/suppliers'),
+    listInventory: () => call<any[]>('/inventory'),
+    listDeliveries: () => call<any[]>('/deliveries'),
+    listCommunications: () => call<any[]>('/communications'),
   }
 }
 

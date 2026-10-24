@@ -34,6 +34,22 @@ export default defineConfig({
           }
         },
       },
+      '/suppliers': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/inventory': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/deliveries': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/communications': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   test: {

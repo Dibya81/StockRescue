@@ -12,6 +12,7 @@ import {
   Layers,
   CheckCircle2,
   RefreshCw,
+  Zap,
 } from 'lucide-react'
 import { useCases } from '@/hooks/api'
 import { SkeletonCard } from '@/components/ui/Skeleton'
@@ -154,6 +155,45 @@ export function DashboardPage() {
           >
             <Plus className="h-4 w-4" />
             Intake New Case
+          </Link>
+        </div>
+      </div>
+
+      {/* Hero Multi-Agent Simulation Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-[#2563EB]/40 bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0F172A] p-5 text-white shadow-lg">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#DC2626] text-white flex-shrink-0 shadow-md">
+              <AlertTriangle className="h-5 w-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-xs uppercase tracking-wider text-[#FCA5A5] bg-[#EF4444]/20 border border-[#EF4444]/40 px-2.5 py-0.5 rounded-full">
+                  P1 Disruption · Case CASE-MTR-4471
+                </span>
+                <span className="text-xs text-[#94A3B8] font-mono">
+                  Deficit: -10 Units (SKU-IND-MTR-4471)
+                </span>
+                <span className="text-xs text-[#FBBF24] font-semibold">
+                  $48k/hr Downtime Penalty
+                </span>
+              </div>
+              <h3 className="text-base font-bold text-white mt-1">
+                Packaging Line 3 Drive Motor Burnout — Multi-Agent Rescue Simulation Ready
+              </h3>
+              <p className="text-xs text-[#94A3B8] mt-0.5 max-w-2xl">
+                Execute parallel autonomous sourcing across 8 agents to discover certified substitute motors, calculate optimal split-procurement, and book priority express flight within 18 hours.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/agents"
+            className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] hover:from-[#1D4ED8] hover:to-[#1E40AF] px-5 py-3 text-xs font-bold text-white shadow-lg shadow-[#2563EB]/25 hover:scale-102 transition-all whitespace-nowrap"
+          >
+            <Zap className="h-4 w-4 fill-white" />
+            Launch Live 8-Agent Simulation
+            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
       </div>
