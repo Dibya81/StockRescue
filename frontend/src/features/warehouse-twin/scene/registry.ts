@@ -34,3 +34,10 @@ export function setEntityPosition(id: string, x: number, y: number, z: number) {
   if (v) v.set(x, y, z)
   else entityPositions.set(id, new THREE.Vector3(x, y, z))
 }
+
+/**
+ * True when a click is really the end of a camera drag (orbit/pan). R3F's
+ * `delta` is the pointer travel in pixels between down and up; selections
+ * ignore anything beyond a small tolerance.
+ */
+export const isDragRelease = (e: { delta: number }) => e.delta > 6

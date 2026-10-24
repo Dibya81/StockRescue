@@ -80,10 +80,17 @@ export function CameraRig({ plan }: { plan: SitePlan }) {
     c.smoothTime = 0.35
     c.draggingSmoothTime = 0.12
     c.dollyToCursor = true
+    // Taking the mouse (orbit, pan, zoom) hands control back to the user
+    const onUserControl = () => {
+      const st = useTwinStore.getState()
+      if (st.follow) st.setFollow(null)
+    }
+    c.addEventListener('controlstart', onUserControl)
     // First mount, and every return from walk mode, frames the current preset
     initialised.current = true
     const start = plan.presets.find(p => p.id === useTwinStore.getState().preset) ?? plan.presets[0]
     void lookAt(start, false)
+    return () => c.removeEventListener('controlstart', onUserControl)
   }, [plan, lookAt, walk])
 
   // Preset requests (including re-selecting the current one)

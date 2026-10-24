@@ -17,6 +17,7 @@ import {
 import { getSceneParams } from '../world/sceneParams'
 import { rackHeight } from '../world/layoutToWorld'
 import { rbox } from './Building'
+import { isDragRelease } from './registry'
 import {
   createCartonTexture,
   createPalletTexture,
@@ -253,6 +254,7 @@ export function Inventory({ layout, lots, highlightSku, onPick, onHover }: Inven
   // ── Picking ──
   const pickFrom = (list: readonly { positionId: string }[]) => ({
     onClick: (e: ThreeEvent<MouseEvent>) => {
+      if (isDragRelease(e)) return
       if (e.instanceId == null || !list[e.instanceId]) return
       e.stopPropagation()
       onPick(list[e.instanceId].positionId)

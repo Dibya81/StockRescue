@@ -21,7 +21,7 @@ import {
 import type { SitePlan } from '../world/sitePlan'
 import { TrafficManager } from '../world/traffic'
 import { startKey, useTwinStore } from '../store/twinStore'
-import { mounts, sceneStats, setEntityPosition } from './registry'
+import { isDragRelease, mounts, sceneStats, setEntityPosition } from './registry'
 import { createCladdingNormal, createCartonTexture } from './textures'
 import { SpriteLabel } from './Building'
 
@@ -442,6 +442,7 @@ function EquipmentUnit({ eq, route, mats, traffic, granted, stale, onSelect }: U
     <group
       ref={root}
       onClick={e => {
+        if (isDragRelease(e)) return
         e.stopPropagation()
         onSelect(eq.id)
       }}
@@ -503,7 +504,7 @@ function Conveyor({ eq, mats, onSelect }: { eq: Equipment; mats: Record<MatKey, 
   }, [eq.id, eq.home.x, eq.home.z])
   const L = 6
   return (
-    <group position={[eq.home.x, 0, eq.home.z]} onClick={e => { e.stopPropagation(); onSelect(eq.id) }}>
+    <group position={[eq.home.x, 0, eq.home.z]} onClick={e => { if (isDragRelease(e)) return; e.stopPropagation(); onSelect(eq.id) }}>
       {[-0.36, 0.36].map(z => <mesh key={z} position={[0, 0.82, z]} material={mats.steel}><boxGeometry args={[L, 0.12, 0.06]} /></mesh>)}
       {[-L / 2 + 0.3, 0, L / 2 - 0.3].flatMap(x => [-0.32, 0.32].map(z => (
         <mesh key={`${x}${z}`} position={[x, 0.4, z]} material={mats.dark}><boxGeometry args={[0.05, 0.8, 0.05]} /></mesh>
@@ -579,7 +580,7 @@ function Truck({ shipment, layout, plan, mats, night, stale, onSelect }: {
   const cargoZ = -L / 2 + cargoL / 2
   const cargoMat = shipment.vehicleType === 'container_truck' ? mats.container : mats.white
   return (
-    <group ref={root} onClick={e => { e.stopPropagation(); onSelect(shipment.id) }}>
+    <group ref={root} onClick={e => { if (isDragRelease(e)) return; e.stopPropagation(); onSelect(shipment.id) }}>
       <ContactShadow w={2.6} d={L} />
       {/* Chassis rails */}
       <mesh position={[0, 0.75, 0]} material={mats.dark}><boxGeometry args={[1.0, 0.25, L - 0.4]} /></mesh>

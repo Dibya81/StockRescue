@@ -9,6 +9,7 @@ import { BRAND_BLUE, DOCK_DOOR } from '../world/constants'
 import { layoutToWorld, levelY, rackHeight, rackRotation, rotateXZ } from '../world/layoutToWorld'
 import type { Selection } from '../store/twinStore'
 import { Label } from './Building'
+import { isDragRelease } from './registry'
 
 export type HoverTarget = { kind: 'rack' | 'position' | 'dock'; id: string } | null
 
@@ -83,6 +84,7 @@ export function Interaction(props: InteractionProps) {
   const rackTf = selectedRack ? layoutToWorld(layout, selectedRack.id) : null
 
   const onRackClick = (e: ThreeEvent<MouseEvent>) => {
+    if (isDragRelease(e)) return
     const rack = e.instanceId != null ? layout.racks[e.instanceId] : undefined
     if (!rack) return
     // Inside the selected rack, let positions and stock take the click
@@ -166,6 +168,7 @@ export function Interaction(props: InteractionProps) {
             rotation-y={t.rotationY}
             scale={[DOCK_DOOR.width + 0.8, DOCK_DOOR.height + 0.8, 1.2]}
             onClick={e => {
+              if (isDragRelease(e)) return
               e.stopPropagation()
               props.onSelectDock(d.id)
             }}
@@ -200,6 +203,7 @@ export function Interaction(props: InteractionProps) {
                   position={[selectedRack.x + tx, y + 0.35, selectedRack.z + tz]}
                   rotation-y={rackTf.rotationY}
                   onClick={e => {
+              if (isDragRelease(e)) return
                     e.stopPropagation()
                     props.onSelectLevel(selectedRack.id, level)
                   }}
@@ -233,6 +237,7 @@ export function Interaction(props: InteractionProps) {
                 rotation-y={t.rotationY}
                 scale={[t.size[0] - 0.02, selectedRack.levelHeight - 0.2, t.size[2]]}
                 onClick={e => {
+              if (isDragRelease(e)) return
                   e.stopPropagation()
                   props.onSelectPosition(pid)
                 }}

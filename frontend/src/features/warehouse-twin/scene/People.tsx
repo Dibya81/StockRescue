@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { WorkerSpec } from '../world/poses'
 import { createRng, getSceneParams } from '../world/sceneParams'
-import { mounts, sceneStats, setEntityPosition } from './registry'
+import { isDragRelease, mounts, sceneStats, setEntityPosition } from './registry'
 
 // Articulated procedural workers: one InstancedMesh per body part, joint
 // angles from a small activity state machine, stride tied to distance.
@@ -230,7 +230,7 @@ export function People({ workers, onSelect }: PeopleProps) {
   })
 
   const torsoClick = (e: ThreeEvent<MouseEvent>) => {
-    if (e.instanceId == null) return
+    if (isDragRelease(e) || e.instanceId == null) return
     const p = people[e.instanceId]
     if (!p) return
     e.stopPropagation()
