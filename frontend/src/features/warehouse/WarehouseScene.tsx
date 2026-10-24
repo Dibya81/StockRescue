@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react'
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
@@ -71,34 +71,67 @@ function getRecordStatus(inv?: InventoryRecord): 'normal' | 'low' | 'shortage' |
 }
 
 // ─────────────────────────────────────────────────────────
-// Smooth Camera Controller with Lerping & Floor Bounds
+// Smooth Camera Controller with Lerping & Free Orbit/Zoom
 // ─────────────────────────────────────────────────────────
 function CameraController({
   targetPos,
   targetLookAt,
   controlsRef,
+  onTransitionComplete,
 }: {
   targetPos: [number, number, number] | null
   targetLookAt: [number, number, number] | null
   controlsRef: React.MutableRefObject<any>
+  onTransitionComplete?: () => void
 }) {
   const { camera } = useThree()
-  const currentTarget = useRef(new THREE.Vector3(0, 1.2, 0))
-  const currentPos = useRef(new THREE.Vector3(16, 12, 16))
+  const isTransitioning = useRef(false)
+  const destPos = useRef<THREE.Vector3 | null>(null)
+  const destLookAt = useRef<THREE.Vector3 | null>(null)
+
+  useEffect(() => {
+    if (targetPos || targetLookAt) {
+      if (targetPos) destPos.current = new THREE.Vector3(...targetPos)
+      if (targetLookAt) destLookAt.current = new THREE.Vector3(...targetLookAt)
+      isTransitioning.current = true
+    } else {
+      isTransitioning.current = false
+      destPos.current = null
+      destLookAt.current = null
+    }
+  }, [targetPos, targetLookAt])
 
   useFrame((_, delta) => {
-    if (!controlsRef.current) return
-    const damping = Math.min(1, delta * 4.5)
+    if (!controlsRef.current || !isTransitioning.current) return
 
-    if (targetLookAt) {
-      currentTarget.current.lerp(new THREE.Vector3(...targetLookAt), damping)
-      controlsRef.current.target.copy(currentTarget.current)
+    const damping = Math.min(1, delta * 5.0)
+    let posDone = true
+    let lookDone = true
+
+    if (destLookAt.current) {
+      controlsRef.current.target.lerp(destLookAt.current, damping)
+      if (controlsRef.current.target.distanceTo(destLookAt.current) > 0.04) {
+        lookDone = false
+      }
     }
-    if (targetPos) {
-      currentPos.current.lerp(new THREE.Vector3(...targetPos), damping)
-      camera.position.copy(currentPos.current)
+
+    if (destPos.current) {
+      camera.position.lerp(destPos.current, damping)
+      if (camera.position.distanceTo(destPos.current) > 0.04) {
+        posDone = false
+      }
     }
+
     controlsRef.current.update()
+
+    if (posDone && lookDone) {
+      isTransitioning.current = false
+      destPos.current = null
+      destLookAt.current = null
+      if (onTransitionComplete) {
+        onTransitionComplete()
+      }
+    }
   })
 
   return null
@@ -772,9 +805,19 @@ export function WarehouseScene({
 }: WarehouseSceneProps) {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null)
   const [activePreset, setActivePreset] = useState<CameraPreset>('overview')
-  const [targetPos, setTargetPos] = useState<[number, number, number] | null>(CAMERA_PRESETS.overview.position)
-  const [targetLookAt, setTargetLookAt] = useState<[number, number, number] | null>(CAMERA_PRESETS.overview.target)
+  const [targetPos, setTargetPos] = useState<[number, number, number] | null>(null)
+  const [targetLookAt, setTargetLookAt] = useState<[number, number, number] | null>(null)
   const controlsRef = useRef<any>(null)
+
+  const handleTransitionComplete = useCallback(() => {
+    setTargetPos(null)
+    setTargetLookAt(null)
+  }, [])
+
+  const handleManualControlStart = useCallback(() => {
+    setTargetPos(null)
+    setTargetLookAt(null)
+  }, [])
 
   // 1. Resolve display records: use real inventory or initial fallback records
   const displayInventory = useMemo(() => {
@@ -846,13 +889,21 @@ export function WarehouseScene({
     setTargetLookAt([...conf.target])
   }
 
-  // Handle Zoom In / Out
+  // Handle Zoom In / Out with vector-based offset calculation
   const handleZoom = (factor: number) => {
-    if (controlsRef.current) {
-      const cam = controlsRef.current.object as THREE.PerspectiveCamera
-      cam.position.multiplyScalar(factor)
-      controlsRef.current.update()
-    }
+    if (!controlsRef.current) return
+    const controls = controlsRef.current
+    const cam = controls.object as THREE.PerspectiveCamera
+    if (!cam) return
+
+    const offset = new THREE.Vector3().subVectors(cam.position, controls.target)
+    const currentDist = offset.length()
+    const targetDist = Math.max(3.0, Math.min(48, currentDist * factor))
+    offset.setLength(targetDist)
+
+    const newPos = new THREE.Vector3().addVectors(controls.target, offset)
+    setTargetLookAt([controls.target.x, controls.target.y, controls.target.z])
+    setTargetPos([newPos.x, newPos.y, newPos.z])
   }
 
   // Handle Pallet Selection
@@ -907,8 +958,8 @@ export function WarehouseScene({
         activePreset={activePreset}
         onSelectPreset={handleSelectPreset}
         onReset={handleReset}
-        onZoomIn={() => handleZoom(0.85)}
-        onZoomOut={() => handleZoom(1.15)}
+        onZoomIn={() => handleZoom(0.75)}
+        onZoomOut={() => handleZoom(1.3)}
       />
 
       {/* 3D WebGL Canvas */}
@@ -941,6 +992,7 @@ export function WarehouseScene({
           targetPos={targetPos}
           targetLookAt={targetLookAt}
           controlsRef={controlsRef}
+          onTransitionComplete={handleTransitionComplete}
         />
 
         {/* Concrete Floor, Boundaries, Decals */}
@@ -998,11 +1050,15 @@ export function WarehouseScene({
         {/* Orbit Controls with Safe Polar Angle and Bounds */}
         <OrbitControls
           ref={controlsRef}
-          minDistance={3.5}
-          maxDistance={42}
+          target={[0, 1.2, 0]}
+          minDistance={3.0}
+          maxDistance={48}
           maxPolarAngle={Math.PI / 2.06}
+          enableZoom={true}
+          zoomSpeed={1.2}
           enableDamping
           dampingFactor={0.06}
+          onStart={handleManualControlStart}
           makeDefault
         />
       </Canvas>
