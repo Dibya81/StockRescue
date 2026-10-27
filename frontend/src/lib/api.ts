@@ -150,6 +150,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
     listInventory: () => call<any[]>('/inventory'),
     listDeliveries: () => call<any[]>('/deliveries'),
     listCommunications: () => call<any[]>('/communications'),
+    getSimulationScenario: (caseId: string) => call<unknown>(`/simulation/scenarios/${encodeURIComponent(caseId)}`),
   }
 }
 

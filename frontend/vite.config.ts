@@ -46,6 +46,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/simulation/scenarios': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       '/communications': {
         target: 'http://localhost:8000',
         changeOrigin: true,
